@@ -54,6 +54,7 @@ const CASTLE_ROOK_MOVES := {
 const LIGHT_SQUARE := Color(0.84, 0.72, 0.58, 1.0)
 const DARK_SQUARE := Color(0.38, 0.26, 0.20, 1.0)
 const PIECE_SCENE := preload("res://scenes/Piece.tscn")
+const PROMOTION_POPUP_SCENE := preload("res://scenes/PromotionPopup.tscn")
 
 var square_nodes: Dictionary = {}
 var piece_nodes: Dictionary = {}
@@ -80,6 +81,10 @@ var en_passant_target: String = ""
 var current_turn: String = "white"
 var game_over: bool = false
 var last_status_text: String = ""
+# Set while the player is being asked what to promote a pawn to — input is
+# blocked and the move itself hasn't happened yet (see _show_promotion_popup).
+var awaiting_promotion: bool = false
+var promotion_popup: Control = null
 
 # The opponent is always the color the human doesn't play.
 var ai_color: String = "black" if PLAYER_COLOR == "white" else "white"
@@ -106,6 +111,10 @@ func _ready() -> void:
 
 func reset_game() -> void:
     randomize_ai_difficulty()
+    if promotion_popup != null:
+        promotion_popup.queue_free()
+        promotion_popup = null
+    awaiting_promotion = false
     selected_piece_coord = ""
     _clear_move_highlights()
     for coord in piece_nodes.keys():
@@ -238,7 +247,7 @@ func _place_pieces() -> void:
 
 func _on_piece_hovered(coord: String) -> void:
     hovered_piece_coord = coord
-    if game_over:
+    if game_over or awaiting_promotion:
         return
     if selected_piece_coord == "" and _is_current_turn_piece(coord):
         _show_moves_for_piece(coord)
@@ -249,7 +258,7 @@ func _on_piece_unhovered() -> void:
         _clear_move_highlights()
 
 func _on_piece_clicked(coord: String) -> void:
-    if game_over:
+    if game_over or awaiting_promotion:
         return
 
     if coord == selected_piece_coord:
@@ -260,7 +269,7 @@ func _on_piece_clicked(coord: String) -> void:
 
     if selected_piece_coord != "":
         if coord in selected_piece_moves:
-            _move_piece(selected_piece_coord, coord)
+            _attempt_move(selected_piece_coord, coord)
             return
         selected_piece_coord = ""
         _clear_move_highlights()
@@ -274,11 +283,52 @@ func _on_piece_clicked(coord: String) -> void:
     _set_piece_selection_state()
 
 func _on_square_input(event: InputEvent, coord: String) -> void:
-    if game_over:
+    if game_over or awaiting_promotion:
         return
     if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
         if selected_piece_coord != "" and coord in selected_piece_moves:
-            _move_piece(selected_piece_coord, coord)
+            _attempt_move(selected_piece_coord, coord)
+
+# Routes a human move through the promotion popup first if it's a pawn
+# reaching the last rank; otherwise executes it immediately. The AI never
+# comes through here — it always auto-queens (see _on_ai_move_ready).
+func _attempt_move(from_coord: String, to_coord: String) -> void:
+    if current_turn == PLAYER_COLOR and _is_promotion_move(from_coord, to_coord):
+        _show_promotion_popup(from_coord, to_coord)
+        return
+    _move_piece(from_coord, to_coord)
+
+func _is_promotion_move(from_coord: String, to_coord: String) -> bool:
+    var symbol: String = board_state.get(from_coord, "")
+    if symbol != "♙" and symbol != "♟":
+        return false
+    var promotion_rank: int = 8 if symbol == "♙" else 1
+    return int(to_coord.substr(1)) == promotion_rank
+
+func _show_promotion_popup(from_coord: String, to_coord: String) -> void:
+    if promotion_popup != null:
+        return
+    awaiting_promotion = true
+    selected_piece_coord = ""
+    _clear_move_highlights()
+    _set_piece_selection_state()
+
+    var popup: Control = PROMOTION_POPUP_SCENE.instantiate()
+    popup.is_white = board_state.get(from_coord, "") == "♙"
+    popup.size = size
+    popup.position = Vector2.ZERO
+    add_child(popup)
+    promotion_popup = popup
+    popup.piece_chosen.connect(func(symbol: String) -> void:
+        _on_promotion_chosen(from_coord, to_coord, symbol)
+    )
+
+func _on_promotion_chosen(from_coord: String, to_coord: String, symbol: String) -> void:
+    if promotion_popup != null:
+        promotion_popup.queue_free()
+        promotion_popup = null
+    awaiting_promotion = false
+    _move_piece(from_coord, to_coord, symbol)
 
 func _is_current_turn_piece(coord: String) -> bool:
     if not board_state.has(coord):
@@ -387,7 +437,7 @@ func _set_piece_selection_state() -> void:
         if piece.has_method("set_selected"):
             piece.set_selected(coord == selected_piece_coord)
 
-func _move_piece(from_coord: String, to_coord: String) -> void:
+func _move_piece(from_coord: String, to_coord: String, promotion_symbol: String = "") -> void:
     if not piece_nodes.has(from_coord):
         return
 
@@ -424,12 +474,32 @@ func _move_piece(from_coord: String, to_coord: String) -> void:
         board_state.erase(en_passant_capture_coord)
     en_passant_target = next_en_passant_target
 
+    if promotion_symbol != "":
+        _apply_promotion(to_coord, promotion_symbol)
+
     selected_piece_coord = ""
     _clear_move_highlights()
     _set_piece_selection_state()
 
     current_turn = "black" if current_turn == "white" else "white"
     _update_status()
+
+# Rewrites the piece now sitting at coord (board_state + the visual node) to
+# a different symbol — used once a pawn reaching the last rank has an actual
+# promotion choice to apply.
+func _apply_promotion(coord: String, symbol: String) -> void:
+    board_state[coord] = symbol
+    var piece: Control = piece_nodes.get(coord)
+    if piece != null and piece.has_method("set_symbol"):
+        piece.set_symbol(symbol, _is_dark_piece(symbol))
+
+# The queen of the moving pawn's color if from/to is a promotion move,
+# otherwise "". The AI always promotes to a queen rather than being asked —
+# see ChessAI.gd/Board.simulate_move for why under-promotion isn't modeled.
+func _auto_promotion_symbol(from_coord: String, to_coord: String) -> String:
+    if not _is_promotion_move(from_coord, to_coord):
+        return ""
+    return "♕" if board_state.get(from_coord, "") == "♙" else "♛"
 
 # Moves one piece's node + board_state entry from one square to another,
 # with no capture/rights/turn handling — the shared primitive _move_piece
@@ -560,7 +630,9 @@ func _on_ai_move_ready(move: Dictionary) -> void:
         if game_over or current_turn != ai_color:
             return
 
-    _move_piece(move.get("from"), move.get("to"))
+    var from_coord: String = move.get("from")
+    var to_coord: String = move.get("to")
+    _move_piece(from_coord, to_coord, _auto_promotion_symbol(from_coord, to_coord))
 
 func _set_status(text: String) -> void:
     last_status_text = text
@@ -599,14 +671,17 @@ func is_in_check(is_white: bool, state: Dictionary) -> bool:
     return _is_square_attacked(king_coord, not is_white, state)
 
 # Executes whatever from/to is given, including relocating the rook on a
-# castle and removing the captured pawn on an en passant capture (detected as
-# a pawn moving diagonally onto an empty square — the only way that happens).
-# It trusts the caller (live board or AI search) to only pass moves that were
-# actually legal to generate.
+# castle, removing the captured pawn on an en passant capture (detected as a
+# pawn moving diagonally onto an empty square — the only way that happens),
+# and auto-promoting a pawn that reaches the last rank to a queen (the AI
+# never considers under-promotion — see ChessAI.gd). It trusts the caller
+# (live board or AI search) to only pass moves that were actually legal to
+# generate.
 func simulate_move(state: Dictionary, from_coord: String, to_coord: String) -> Dictionary:
     var next_state: Dictionary = state.duplicate()
     var moving_symbol: String = next_state.get(from_coord, "")
-    var is_diagonal_pawn_move: bool = (moving_symbol == "♙" or moving_symbol == "♟") and from_coord.substr(0, 1) != to_coord.substr(0, 1)
+    var is_pawn: bool = moving_symbol == "♙" or moving_symbol == "♟"
+    var is_diagonal_pawn_move: bool = is_pawn and from_coord.substr(0, 1) != to_coord.substr(0, 1)
     var is_en_passant_capture: bool = is_diagonal_pawn_move and not next_state.has(to_coord)
 
     next_state[to_coord] = moving_symbol
@@ -619,6 +694,11 @@ func simulate_move(state: Dictionary, from_coord: String, to_coord: String) -> D
             next_state.erase(rook_move["from"])
     elif is_en_passant_capture:
         next_state.erase(to_coord.substr(0, 1) + from_coord.substr(1))
+    elif is_pawn:
+        if moving_symbol == "♙" and to_coord.substr(1) == "8":
+            next_state[to_coord] = "♕"
+        elif moving_symbol == "♟" and to_coord.substr(1) == "1":
+            next_state[to_coord] = "♛"
 
     return next_state
 

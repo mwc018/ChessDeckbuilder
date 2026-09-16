@@ -38,6 +38,12 @@ func _on_piece_input(event: InputEvent) -> void:
 		if board != null and square_coord != "":
 			board._on_piece_clicked(square_coord)
 
+func set_symbol(new_symbol: String, new_dark: bool) -> void:
+	symbol = new_symbol
+	dark = new_dark
+	label.text = symbol
+	label.modulate = Color(0.15, 0.12, 0.08, 1) if dark else Color(1.0, 1.0, 1.0, 1)
+
 func set_selected(value: bool) -> void:
 	selected = value
 	if selected:
