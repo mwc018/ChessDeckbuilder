@@ -20,7 +20,10 @@ func _ready() -> void:
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	label.clip_text = false
-	mouse_filter = Control.MOUSE_FILTER_STOP
+	# PASS, not STOP: piece clicks are still handled below, but a card
+	# dropped on an occupied square needs to bubble up to Board's own
+	# _can_drop_data/_drop_data to register as "played on the board".
+	mouse_filter = Control.MOUSE_FILTER_PASS
 	connect("mouse_entered", Callable(self, "_on_mouse_entered"))
 	connect("mouse_exited", Callable(self, "_on_mouse_exited"))
 	connect("gui_input", Callable(self, "_on_piece_input"))

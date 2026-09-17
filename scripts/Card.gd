@@ -1,5 +1,10 @@
 extends Control
 
+# Emitted after a drop target (e.g. the board) has accepted this card and
+# is about to free it. Let listeners (Match, a hand manager, etc.) react to
+# the card being played before the node disappears.
+signal played
+
 enum CardType { ACTION, MODIFIER, POWER }
 
 const CARD_TYPE_LABELS := {
@@ -234,3 +239,60 @@ func _build_cost_badge() -> void:
     label.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
     label.mouse_filter = Control.MOUSE_FILTER_IGNORE
     badge.add_child(label)
+
+var _is_drag_source: bool = false
+var _press_local_pos: Vector2 = Vector2.ZERO
+var _pressed: bool = false
+var _preview: Control = null
+
+# force_drag() is called on the first hint of motion after the press,
+# rather than returning data from _get_drag_data (which only runs once
+# Godot's built-in drag-detection threshold has been crossed, by which
+# point the mouse has already moved a bit from where the card was grabbed).
+func _gui_input(event: InputEvent) -> void:
+    if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+        _pressed = event.pressed
+        if event.pressed:
+            _press_local_pos = event.position
+        return
+
+    if _pressed and not _is_drag_source and event is InputEventMouseMotion and (event.button_mask & MOUSE_BUTTON_MASK_LEFT):
+        _preview = duplicate()
+        visible = false
+        _is_drag_source = true
+        _pressed = false
+        force_drag({"type": "card", "card": self}, _preview)
+        accept_event()
+
+# Re-applied every frame rather than set once, so the preview tracks the
+# original grab point regardless of whether/when Godot's own drag-preview
+# code touches the preview's position — this runs after input handling for
+# the frame, so it's always the last word on where the preview ends up.
+func _process(_delta: float) -> void:
+    if _is_drag_source and is_instance_valid(_preview):
+        _preview.global_position = get_global_mouse_position() - _press_local_pos
+
+# Broadcast to every Control when any drag ends, regardless of who started
+# or received it — used here just to reveal this card again once its own
+# drag is over, whether it was cancelled or dropped nowhere. A successful
+# play frees the card first, so this never has to run for that case.
+func _notification(what: int) -> void:
+    if what == NOTIFICATION_DRAG_END:
+        visible = true
+        _is_drag_source = false
+        _preview = null
+
+# Node._input still reaches this card while its preview is being dragged
+# elsewhere on screen, so a right-click can cancel the drag no matter where
+# the mouse currently is.
+func _input(event: InputEvent) -> void:
+    if not _is_drag_source:
+        return
+    if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
+        get_viewport().gui_cancel_drag()
+        get_viewport().set_input_as_handled()
+
+# Called by a drop target (e.g. the board) once it accepts this card.
+func confirm_played() -> void:
+    played.emit()
+    queue_free()

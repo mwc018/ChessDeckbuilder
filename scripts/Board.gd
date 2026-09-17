@@ -1,6 +1,7 @@
 extends Control
 
 signal status_changed(text: String)
+signal card_played(card: Control)
 
 const FILES: PackedStringArray = ["a", "b", "c", "d", "e", "f", "g", "h"]
 const STARTING_LAYOUT := {
@@ -150,6 +151,7 @@ func _build_square_grid() -> void:
     squares.set_anchors_preset(Control.PRESET_FULL_RECT)
     squares.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     squares.size_flags_vertical = Control.SIZE_EXPAND_FILL
+    squares.mouse_filter = Control.MOUSE_FILTER_PASS
     add_child(squares)
 
     for rank in range(8, 0, -1):
@@ -164,7 +166,10 @@ func _build_square_grid() -> void:
             square.offset_top = 0
             square.offset_right = 0
             square.offset_bottom = 0
-            square.mouse_filter = Control.MOUSE_FILTER_STOP
+            # PASS, not STOP: clicks are still handled below, but a card
+            # dropped on this square needs to bubble up to Board's own
+            # _can_drop_data/_drop_data to register as "played on the board".
+            square.mouse_filter = Control.MOUSE_FILTER_PASS
             square.connect("gui_input", Callable(self, "_on_square_input").bind("%s%d" % [file_name, rank]))
             squares.add_child(square)
             square_nodes["%s%d" % [file_name, rank]] = square
@@ -249,6 +254,12 @@ func _on_piece_hovered(coord: String) -> void:
     hovered_piece_coord = coord
     if game_over or awaiting_promotion:
         return
+    # Pieces still receive mouse-enter/exit while a card is being dragged
+    # over them (their mouse_filter has to be PASS so a card can be dropped
+    # on an occupied square), so without this check dragging a card across
+    # the board would light up move highlights along the way.
+    if get_viewport().gui_is_dragging():
+        return
     if selected_piece_coord == "" and _is_current_turn_piece(coord):
         _show_moves_for_piece(coord)
 
@@ -281,6 +292,19 @@ func _on_piece_clicked(coord: String) -> void:
     _show_moves_for_piece(coord)
     selected_piece_moves = highlighted_moves.duplicate()
     _set_piece_selection_state()
+
+# _can_drop_data/_drop_data walk up from whatever's under the mouse (a
+# square, a piece, ...) until a control accepts, so implementing these here
+# on Board is enough to accept a card dropped anywhere on the board.
+func _can_drop_data(_at_position: Vector2, data: Variant) -> bool:
+    return typeof(data) == TYPE_DICTIONARY and data.get("type") == "card"
+
+func _drop_data(_at_position: Vector2, data: Variant) -> void:
+    var card: Control = data.get("card")
+    if card == null or not is_instance_valid(card):
+        return
+    card_played.emit(card)
+    card.confirm_played()
 
 func _on_square_input(event: InputEvent, coord: String) -> void:
     if game_over or awaiting_promotion:

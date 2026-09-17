@@ -17,12 +17,18 @@ func _ready() -> void:
     _center_board()
     if board != null:
         board.status_changed.connect(_on_board_status_changed)
+        board.card_played.connect(_on_card_played)
         _on_board_status_changed(board.last_status_text)
     _update_progress_label()
 
 func _on_board_status_changed(text: String) -> void:
     if status_label != null:
         status_label.text = text
+
+# Cards don't do anything yet beyond leaving the hand when dropped on the
+# board — this is the hook where each card's actual effect will be applied.
+func _on_card_played(card: Control) -> void:
+    print("Card played: ", card.card_name)
 
 func _update_progress_label() -> void:
     if progress_label == null or board == null:
