@@ -1,0 +1,9 @@
+[gd_scene format=3 uid="uid://0xh4y8c2k5e4"]
+
+[ext_resource type="Script" uid="uid://by6v34urwvasx" path="res://scripts/Card.gd" id="1_card"]
+
+[node name="Card" type="Control" unique_id=1683474189]
+layout_mode = 3
+anchors_preset = 0
+script = ExtResource("1_card")
+flavor_text = "This is flavor text for the card."

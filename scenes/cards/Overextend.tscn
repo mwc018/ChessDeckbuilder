@@ -1,0 +1,10 @@
+[gd_scene format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/Card.tscn" id="1_card"]
+
+[node name="Overextend" instance=ExtResource("1_card")]
+card_name = "Overextend"
+cost = 1
+card_type = 1
+description = "The next pawn to move from its original square this turn may advance up to 3 squares instead of 2."
+flavor_text = "\"Discipline is the first casualty of ambition.\""
