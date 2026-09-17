@@ -2,6 +2,7 @@
 
 [ext_resource type="Script" uid="uid://inrk6mwawyik" path="res://scripts/Match.gd" id="1_5x2b8"]
 [ext_resource type="PackedScene" path="res://scenes/Board.tscn" id="1_7x2s4"]
+[ext_resource type="PackedScene" path="res://scenes/cards/Overextend.tscn" id="2_hand"]
 
 [node name="Match" type="Control" unique_id=426470950]
 layout_mode = 3
@@ -40,17 +41,17 @@ theme_override_font_sizes/font_size = 15
 text = "Match 1 — AI difficulty 10%"
 horizontal_alignment = 1
 
-[node name="NewMatchButton" type="Button" parent="." unique_id=1784607943]
+[node name="Hand" type="HBoxContainer" parent="." unique_id=2049384756]
 layout_mode = 1
-anchors_preset = 7
-anchor_left = 0.5
+anchors_preset = 12
 anchor_top = 1.0
-anchor_right = 0.5
+anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = -70.0
-offset_top = -46.0
-offset_right = 70.0
-offset_bottom = -12.0
+offset_top = -370.0
+offset_bottom = -10.0
 grow_horizontal = 2
 grow_vertical = 0
-text = "New Match"
+alignment = 1
+
+[node name="Overextend" parent="Hand" instance=ExtResource("2_hand")]
+layout_mode = 2
