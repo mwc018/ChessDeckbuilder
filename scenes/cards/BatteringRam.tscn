@@ -1,0 +1,10 @@
+[gd_scene format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/Card.tscn" id="1_card"]
+
+[node name="BatteringRam" instance=ExtResource("1_card")]
+card_name = "Battering Ram"
+cost = 2
+card_type = 1
+description = "The next Rook to move that captures a piece continues through it and also captures the next piece in its path."
+flavor_text = "\"Walls do not stop at the first thing they break.\""

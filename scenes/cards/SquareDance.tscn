@@ -1,0 +1,10 @@
+[gd_scene format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/Card.tscn" id="1_card"]
+
+[node name="SquareDance" instance=ExtResource("1_card")]
+card_name = "Square Dance"
+cost = 1
+card_type = 0
+description = "The next piece to move may instead swap places with an adjacent friendly piece."
+flavor_text = "\"Take your partner, promenade — nobody said the line had to hold still.\""

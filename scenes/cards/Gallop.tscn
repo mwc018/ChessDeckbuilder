@@ -1,0 +1,10 @@
+[gd_scene format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/Card.tscn" id="1_card"]
+
+[node name="Gallop" instance=ExtResource("1_card")]
+card_name = "Gallop"
+cost = 1
+card_type = 1
+description = "The next Knight to move may also leap 1 square in one direction and 3 in the other, landing on an empty square or capturing an enemy piece."
+flavor_text = "\"Give the horse its head, and it will carry you further than you asked.\""

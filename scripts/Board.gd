@@ -2,6 +2,7 @@ extends Control
 
 signal status_changed(text: String)
 signal card_played(card: Control)
+signal energy_changed(energy: int, max_energy: int)
 
 const FILES: PackedStringArray = ["a", "b", "c", "d", "e", "f", "g", "h"]
 const STARTING_LAYOUT := {
@@ -87,6 +88,48 @@ var last_status_text: String = ""
 var awaiting_promotion: bool = false
 var promotion_popup: Control = null
 
+# Set by playing the Overextend card; lets the human's own next pawn move
+# from its original square advance 3 squares instead of 2 (see
+# _collect_legal_moves_for_piece). Cleared once that move happens, whether
+# or not it was actually a qualifying pawn move — the effect only lasts for
+# the player's very next move ("this turn" — a chess turn is one move).
+var pending_overextend: bool = false
+
+# Set by playing the Stride card; lets the human's own next pawn move advance
+# 2 squares regardless of whether that pawn has already moved this game (see
+# _collect_legal_moves_for_piece). Cleared once that move happens, whether or
+# not it was actually a qualifying pawn move — same "next move only" window
+# as Overextend, not "the next pawn to move" (which could be turns away).
+var pending_stride: bool = false
+
+# Set by playing the Square Dance card; lets the human's own next piece to
+# move swap places with an adjacent friendly piece instead of moving normally
+# (see _add_square_dance_destinations/_move_piece's swap branch). Same
+# "next move only" window as Overextend/Stride, not "the next piece to move"
+# in some open-ended sense — it's spent by whatever the player's very next
+# move turns out to be, swap or not.
+var pending_square_dance: bool = false
+
+# Set by playing the Battering Ram card; lets the human's own next Rook move
+# that captures a piece continue through it and capture a second piece
+# further along the same line, if one is there to hit. Unlike Overextend this
+# persists across turns until a Rook actually moves (see _move_piece), not
+# just the player's very next move — "the next Rook to move" may not be it.
+var pending_battering_ram: bool = false
+
+# Set by playing the Gallop card; lets the human's own next Knight move
+# continue 1 additional square in any direction after a non-capturing leap
+# (see _add_gallop_destinations). Like Battering Ram this persists across
+# turns until a Knight actually moves, not just the player's very next move —
+# "the next Knight to move" may not be it.
+var pending_gallop: bool = false
+
+# The resource cards cost to play. Refills to MAX_ENERGY at the start of
+# each of the player's turns; spent energy otherwise carries through the
+# opponent's turn unchanged.
+const MAX_ENERGY: int = 3
+var energy: int = MAX_ENERGY
+
 # The opponent is always the color the human doesn't play.
 var ai_color: String = "black" if PLAYER_COLOR == "white" else "white"
 @export var ai_enabled: bool = true
@@ -125,6 +168,13 @@ func reset_game() -> void:
     piece_nodes.clear()
     current_turn = "white"
     game_over = false
+    pending_overextend = false
+    pending_stride = false
+    pending_square_dance = false
+    pending_battering_ram = false
+    pending_gallop = false
+    energy = MAX_ENERGY
+    energy_changed.emit(energy, MAX_ENERGY)
     _place_pieces()
     _layout_board()
     _update_status()
@@ -295,16 +345,39 @@ func _on_piece_clicked(coord: String) -> void:
 
 # _can_drop_data/_drop_data walk up from whatever's under the mouse (a
 # square, a piece, ...) until a control accepts, so implementing these here
-# on Board is enough to accept a card dropped anywhere on the board.
+# on Board is enough to accept a card dropped anywhere on the board. A card
+# that costs more than the player's current energy is rejected here, same
+# as a drop outside the board — it just snaps back to the hand.
 func _can_drop_data(_at_position: Vector2, data: Variant) -> bool:
-    return typeof(data) == TYPE_DICTIONARY and data.get("type") == "card"
+    if typeof(data) != TYPE_DICTIONARY or data.get("type") != "card":
+        return false
+    var card: Control = data.get("card")
+    return card != null and is_instance_valid(card) and card.cost <= energy
 
 func _drop_data(_at_position: Vector2, data: Variant) -> void:
     var card: Control = data.get("card")
     if card == null or not is_instance_valid(card):
         return
+    _apply_card_effect(card.card_name)
+    energy -= card.cost
+    energy_changed.emit(energy, MAX_ENERGY)
     card_played.emit(card)
     card.confirm_played()
+
+# Dispatches by card name to whatever rule change that card makes. Cards
+# with no effect implemented yet still play (leave the hand) — they just
+# don't do anything, same as before any card had a real effect.
+func _apply_card_effect(card_name: String) -> void:
+    if card_name == "Overextend" and current_turn == PLAYER_COLOR:
+        pending_overextend = true
+    elif card_name == "Stride" and current_turn == PLAYER_COLOR:
+        pending_stride = true
+    elif card_name == "Square Dance" and current_turn == PLAYER_COLOR:
+        pending_square_dance = true
+    elif card_name == "Battering Ram" and current_turn == PLAYER_COLOR:
+        pending_battering_ram = true
+    elif card_name == "Gallop" and current_turn == PLAYER_COLOR:
+        pending_gallop = true
 
 func _on_square_input(event: InputEvent, coord: String) -> void:
     if game_over or awaiting_promotion:
@@ -469,13 +542,28 @@ func _move_piece(from_coord: String, to_coord: String, promotion_symbol: String 
     if moving_piece == null:
         return
 
+    var moving_symbol: String = board_state.get(from_coord, "")
+
+    # Square Dance: the only way to_coord can already hold a piece of the
+    # mover's own color is via the swap destinations _add_square_dance_
+    # destinations added — a normal move never targets a friendly-occupied
+    # square. Handled as its own short-circuit since none of the capture,
+    # castling, en passant, or promotion handling below applies to it.
+    var to_symbol: String = board_state.get(to_coord, "")
+    var is_square_dance_swap: bool = to_symbol != "" and _is_white_piece(to_symbol) == _is_white_piece(moving_symbol)
+    if is_square_dance_swap:
+        _update_castle_rights_for_move(from_coord, to_coord)
+        _swap_piece_nodes(from_coord, to_coord)
+        en_passant_target = ""
+        _finish_move(moving_symbol)
+        return
+
     if piece_nodes.has(to_coord):
         var captured: Control = piece_nodes[to_coord]
         if captured != null:
             captured.queue_free()
         piece_nodes.erase(to_coord)
 
-    var moving_symbol: String = board_state.get(from_coord, "")
     var is_king: bool = moving_symbol == "♔" or moving_symbol == "♚"
     var is_pawn: bool = moving_symbol == "♙" or moving_symbol == "♟"
     var rook_move: Dictionary = CASTLE_ROOK_MOVES.get(from_coord + to_coord, {}) if is_king else {}
@@ -484,11 +572,19 @@ func _move_piece(from_coord: String, to_coord: String, promotion_symbol: String 
     var is_en_passant_capture: bool = is_pawn and from_coord.substr(0, 1) != to_coord.substr(0, 1) and not board_state.has(to_coord)
     var en_passant_capture_coord: String = to_coord.substr(0, 1) + from_coord.substr(1) if is_en_passant_capture else ""
     var next_en_passant_target: String = _compute_en_passant_target(from_coord, to_coord, moving_symbol)
+    var battering_ram_pierced_coord: String = _resolve_battering_ram_pierce(from_coord, to_coord, moving_symbol)
 
     _update_castle_rights_for_move(from_coord, to_coord)
     _relocate_piece_node(from_coord, to_coord)
     if not rook_move.is_empty():
         _relocate_piece_node(rook_move["from"], rook_move["to"])
+    if battering_ram_pierced_coord != "":
+        if piece_nodes.has(battering_ram_pierced_coord):
+            var pierced_piece: Control = piece_nodes[battering_ram_pierced_coord]
+            if pierced_piece != null:
+                pierced_piece.queue_free()
+            piece_nodes.erase(battering_ram_pierced_coord)
+        board_state.erase(battering_ram_pierced_coord)
     if en_passant_capture_coord != "":
         if piece_nodes.has(en_passant_capture_coord):
             var captured_pawn: Control = piece_nodes[en_passant_capture_coord]
@@ -501,12 +597,78 @@ func _move_piece(from_coord: String, to_coord: String, promotion_symbol: String 
     if promotion_symbol != "":
         _apply_promotion(to_coord, promotion_symbol)
 
+    _finish_move(moving_symbol)
+
+# Shared end-of-move bookkeeping: clears the current selection/highlights,
+# consumes whichever "next move" card effects applied to this move, flips
+# the turn, and refills the mover's energy once it becomes the player's turn
+# again. Used by both a normal move and a Square Dance swap, which otherwise
+# share none of the rest of _move_piece's capture/castle/en passant handling.
+func _finish_move(moving_symbol: String) -> void:
     selected_piece_coord = ""
     _clear_move_highlights()
     _set_piece_selection_state()
 
+    # The Overextend/Stride/Square Dance windows only ever cover the player's
+    # very next move — win or lose the bonus, it's spent once that move
+    # (this one) happens.
+    if current_turn == PLAYER_COLOR:
+        pending_overextend = false
+        pending_stride = false
+        pending_square_dance = false
+        # Battering Ram and Gallop each wait for the next move of their own
+        # piece type specifically, however many other moves happen first —
+        # spent once that piece moves, whether or not the bonus was used.
+        if moving_symbol == "♖":
+            pending_battering_ram = false
+        if moving_symbol == "♘":
+            pending_gallop = false
+
     current_turn = "black" if current_turn == "white" else "white"
+    if current_turn == PLAYER_COLOR:
+        energy = MAX_ENERGY
+        energy_changed.emit(energy, MAX_ENERGY)
     _update_status()
+
+# Moves the pieces at from_coord and to_coord (both board_state + their
+# visual nodes) into each other's squares — the primitive a Square Dance swap
+# uses in place of _relocate_piece_node, which assumes only one side of the
+# move is an occupied piece.
+func _swap_piece_nodes(from_coord: String, to_coord: String) -> void:
+    var piece_a: Control = piece_nodes.get(from_coord)
+    var piece_b: Control = piece_nodes.get(to_coord)
+    var square_a: ColorRect = square_nodes.get(from_coord)
+    var square_b: ColorRect = square_nodes.get(to_coord)
+
+    if piece_a != null and square_a != null and piece_a.get_parent() == square_a:
+        square_a.remove_child(piece_a)
+    if piece_b != null and square_b != null and piece_b.get_parent() == square_b:
+        square_b.remove_child(piece_b)
+
+    if piece_a != null and square_b != null:
+        square_b.add_child(piece_a)
+        piece_a.square_coord = to_coord
+        piece_a.position = Vector2.ZERO
+        piece_a.offset_left = 0
+        piece_a.offset_top = 0
+        piece_a.offset_right = 0
+        piece_a.offset_bottom = 0
+    if piece_b != null and square_a != null:
+        square_a.add_child(piece_b)
+        piece_b.square_coord = from_coord
+        piece_b.position = Vector2.ZERO
+        piece_b.offset_left = 0
+        piece_b.offset_top = 0
+        piece_b.offset_right = 0
+        piece_b.offset_bottom = 0
+
+    piece_nodes[from_coord] = piece_b
+    piece_nodes[to_coord] = piece_a
+
+    var symbol_a: String = board_state.get(from_coord, "")
+    var symbol_b: String = board_state.get(to_coord, "")
+    board_state[from_coord] = symbol_b
+    board_state[to_coord] = symbol_a
 
 # Rewrites the piece now sitting at coord (board_state + the visual node) to
 # a different symbol — used once a pawn reaching the last rank has an actual
@@ -745,7 +907,248 @@ func _collect_legal_moves_for_piece(symbol: String, from_coord: String, state: D
     var is_white: bool = _is_white_piece(symbol)
     var king_coord: String = _find_king_coord(is_white, state)
     var king_in_check: bool = _is_square_attacked(king_coord, not is_white, state)
-    return _collect_legal_moves_for_piece_fast(symbol, from_coord, state, king_coord, king_in_check, rights, ep_target)
+    var result: Dictionary = _collect_legal_moves_for_piece_fast(symbol, from_coord, state, king_coord, king_in_check, rights, ep_target)
+    if pending_overextend and symbol == "♙" and from_coord.substr(1) == "2":
+        _add_overextend_destination(from_coord, state, is_white, result)
+    if pending_stride and symbol == "♙":
+        _add_stride_destination(from_coord, state, is_white, result)
+    if pending_square_dance:
+        _add_square_dance_destinations(from_coord, state, is_white, result)
+    if pending_battering_ram and symbol == "♖":
+        _add_battering_ram_destination(from_coord, state, is_white, result)
+    if pending_gallop and symbol == "♘":
+        _add_gallop_destinations(from_coord, state, is_white, result)
+    return result
+
+# Gallop: adds the Knight's "long" leaps — 1 square in one direction and 3 in
+# the other, instead of the usual 1-and-2 — as extra destinations. Like any
+# normal Knight leap it jumps clean over whatever's between from_coord and
+# the landing square (nothing in between blocks it), and it can land on an
+# empty square or capture an enemy piece the same as a normal Knight move; a
+# friendly piece on the landing square blocks that one leap same as usual.
+# Only reachable from _collect_legal_moves_for_piece (the human preview/
+# selection entry point), never from the AI/attack-detection paths, so this
+# can't affect the AI's search or leak the bonus onto the opponent's knights.
+func _add_gallop_destinations(from_coord: String, state: Dictionary, is_white: bool, result: Dictionary) -> void:
+    var destinations: Array[String] = result.get("destinations", [])
+    var file_index: int = _file_to_index(from_coord.substr(0, 1))
+    var rank_index: int = int(from_coord.substr(1)) - 1
+    var leap_offsets: Array[Vector2i] = [
+        Vector2i(1, 3), Vector2i(1, -3), Vector2i(-1, 3), Vector2i(-1, -3),
+        Vector2i(3, 1), Vector2i(3, -1), Vector2i(-3, 1), Vector2i(-3, -1),
+    ]
+
+    for offset in leap_offsets:
+        var x: int = file_index + offset.x
+        var y: int = rank_index + offset.y
+        if x < 0 or x >= 8 or y < 0 or y >= 8:
+            continue
+        var coord: String = _index_to_coord(x, y)
+        if coord in destinations:
+            continue
+        if state.has(coord) and _is_white_piece(state[coord]) == is_white:
+            continue
+        if _move_leaves_king_in_check(from_coord, coord, is_white, state):
+            continue
+        destinations.append(coord)
+
+    result["destinations"] = destinations
+
+# Square Dance: any friendly piece adjacent to this one (any of the 8
+# surrounding squares) can be swapped into, regardless of what this piece
+# would normally be able to reach — a swap isn't a slide/jump along this
+# piece's usual move pattern, so it's added independent of symbol. Only
+# reachable from _collect_legal_moves_for_piece (the human preview/selection
+# entry point), never from the AI/attack-detection paths, so this can't
+# affect the AI's search or leak the bonus onto the opponent's pieces.
+func _add_square_dance_destinations(from_coord: String, state: Dictionary, is_white: bool, result: Dictionary) -> void:
+    var destinations: Array[String] = result.get("destinations", [])
+    var file_index: int = _file_to_index(from_coord.substr(0, 1))
+    var rank_index: int = int(from_coord.substr(1)) - 1
+    var offsets: Array[Vector2i] = [
+        Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1),
+        Vector2i(1, 1), Vector2i(1, -1), Vector2i(-1, 1), Vector2i(-1, -1),
+    ]
+    for offset in offsets:
+        var x: int = file_index + offset.x
+        var y: int = rank_index + offset.y
+        if x < 0 or x >= 8 or y < 0 or y >= 8:
+            continue
+        var coord: String = _index_to_coord(x, y)
+        if coord in destinations or not state.has(coord):
+            continue
+        if _is_white_piece(state[coord]) != is_white:
+            continue
+        if _swap_leaves_king_in_check(from_coord, coord, is_white, state):
+            continue
+        destinations.append(coord)
+    result["destinations"] = destinations
+
+# Whether swapping the pieces at from_coord and to_coord would leave the
+# mover's own king in check — unlike a normal move, both squares change
+# occupant at once (neither is simply vacated), so it needs its own
+# simulation rather than the generic single-square _move_leaves_king_in_check.
+func _swap_leaves_king_in_check(from_coord: String, to_coord: String, is_white: bool, state: Dictionary) -> bool:
+    var simulated: Dictionary = state.duplicate()
+    var symbol_at_from: String = simulated.get(from_coord, "")
+    var symbol_at_to: String = simulated.get(to_coord, "")
+    simulated[from_coord] = symbol_at_to
+    simulated[to_coord] = symbol_at_from
+
+    var king_coord: String
+    if symbol_at_from == "♔" or symbol_at_from == "♚":
+        king_coord = to_coord
+    elif symbol_at_to == "♔" or symbol_at_to == "♚":
+        king_coord = from_coord
+    else:
+        king_coord = _find_king_coord(is_white, simulated)
+
+    return _is_square_attacked(king_coord, not is_white, simulated)
+
+# Overextend: if the two-square advance is already legal (so the path up to
+# it is clear and safe), and the third square ahead is also empty and safe,
+# add it as an extra destination/path square. Only reachable from
+# _collect_legal_moves_for_piece (the human preview/selection entry point),
+# never from the AI/attack-detection paths, so this can't affect the AI's
+# search or leak the bonus onto the opponent's pawns.
+func _add_overextend_destination(from_coord: String, state: Dictionary, is_white: bool, result: Dictionary) -> void:
+    var file_char: String = from_coord.substr(0, 1)
+    var two_step_coord: String = _advance_coord(file_char, 2, 0, 2)
+    var destinations: Array[String] = result.get("destinations", [])
+    if two_step_coord == "" or not (two_step_coord in destinations):
+        return
+    var three_step_coord: String = _advance_coord(file_char, 2, 0, 3)
+    if three_step_coord == "" or _piece_exists_at(three_step_coord, state):
+        return
+    if _move_leaves_king_in_check(from_coord, three_step_coord, is_white, state):
+        return
+    destinations.append(three_step_coord)
+    var paths: Array[String] = result.get("paths", [])
+    if not (two_step_coord in paths):
+        paths.append(two_step_coord)
+    result["destinations"] = destinations
+    result["paths"] = paths
+
+# Stride: whatever rank this pawn is currently on (not just its original
+# rank — unlike Overextend, this is meant to restore the two-square advance
+# to a pawn that already spent its one-time right), if the square directly
+# ahead is empty and safe and the square beyond that is also empty and safe,
+# add the two-square advance as an extra destination/path square. A pawn
+# still on its original rank already has this move naturally, so this simply
+# does nothing new for it. Only reachable from _collect_legal_moves_for_piece
+# (the human preview/selection entry point), never from the AI/attack-
+# detection paths, so this can't affect the AI's search or leak the bonus
+# onto the opponent's pawns.
+func _add_stride_destination(from_coord: String, state: Dictionary, is_white: bool, result: Dictionary) -> void:
+    var file_char: String = from_coord.substr(0, 1)
+    var rank_number: int = int(from_coord.substr(1))
+    var one_step_coord: String = _advance_coord(file_char, rank_number, 0, 1)
+    var two_step_coord: String = _advance_coord(file_char, rank_number, 0, 2)
+    if one_step_coord == "" or two_step_coord == "":
+        return
+    if _piece_exists_at(one_step_coord, state) or _piece_exists_at(two_step_coord, state):
+        return
+    var destinations: Array[String] = result.get("destinations", [])
+    if two_step_coord in destinations:
+        return
+    if _move_leaves_king_in_check(from_coord, two_step_coord, is_white, state):
+        return
+    destinations.append(two_step_coord)
+    var paths: Array[String] = result.get("paths", [])
+    if not (one_step_coord in paths):
+        paths.append(one_step_coord)
+    result["destinations"] = destinations
+    result["paths"] = paths
+
+# Battering Ram: for each capturing destination the Rook already has, look
+# further past it along the same line for a second enemy piece with nothing
+# but empty squares in between (a friendly piece, or the board edge, blocks
+# the pierce same as it would block a normal slide). If one is there, add its
+# square as an extra destination — the actual removal of the pierced-through
+# piece happens in _move_piece, keyed off pending_battering_ram/moving_symbol
+# rather than off this generated destination itself. Only reachable from
+# _collect_legal_moves_for_piece (the human preview/selection entry point),
+# never from the AI/attack-detection paths, so this can't affect the AI's
+# search or leak the bonus onto the opponent's rooks.
+func _add_battering_ram_destination(from_coord: String, state: Dictionary, is_white: bool, result: Dictionary) -> void:
+    var destinations: Array[String] = result.get("destinations", [])
+    var paths: Array[String] = result.get("paths", [])
+    var extra_destinations: Array[String] = []
+    var extra_paths: Array[String] = []
+
+    for first_capture in destinations.duplicate():
+        if not state.has(first_capture):
+            continue  # a non-capturing destination has nothing to pierce through
+        var dir: Vector2i = _rook_direction(from_coord, first_capture)
+        if dir == Vector2i.ZERO:
+            continue
+
+        var x: int = _file_to_index(first_capture.substr(0, 1)) + dir.x
+        var y: int = int(first_capture.substr(1)) - 1 + dir.y
+        var between: Array[String] = []
+        while x >= 0 and x < 8 and y >= 0 and y < 8:
+            var coord: String = _index_to_coord(x, y)
+            if state.has(coord):
+                if _is_white_piece(state[coord]) != is_white:
+                    var state_without_first_capture: Dictionary = state.duplicate()
+                    state_without_first_capture.erase(first_capture)
+                    if not _move_leaves_king_in_check(from_coord, coord, is_white, state_without_first_capture):
+                        extra_destinations.append(coord)
+                        extra_paths.append(first_capture)
+                        extra_paths.append_array(between)
+                break
+            between.append(coord)
+            x += dir.x
+            y += dir.y
+
+    for extra in extra_destinations:
+        if not (extra in destinations):
+            destinations.append(extra)
+    for extra in extra_paths:
+        if not (extra in paths):
+            paths.append(extra)
+    result["destinations"] = destinations
+    result["paths"] = paths
+
+# The unit step from from_coord to to_coord if they share a rank or file
+# (i.e. a Rook could travel directly between them), otherwise Vector2i.ZERO.
+func _rook_direction(from_coord: String, to_coord: String) -> Vector2i:
+    var from_file: int = _file_to_index(from_coord.substr(0, 1))
+    var from_rank: int = int(from_coord.substr(1))
+    var to_file: int = _file_to_index(to_coord.substr(0, 1))
+    var to_rank: int = int(to_coord.substr(1))
+    if from_file == to_file and from_rank != to_rank:
+        return Vector2i(0, 1 if to_rank > from_rank else -1)
+    if from_rank == to_rank and from_file != to_file:
+        return Vector2i(1 if to_file > from_file else -1, 0)
+    return Vector2i.ZERO
+
+# The square of the piece a Battering Ram Rook move pierces through en route
+# from from_coord to to_coord, or "" if this move isn't one (no pending
+# effect, the mover isn't a Rook, or there's simply nothing between the two
+# squares — true for every ordinary Rook move). Used by _move_piece to remove
+# that piece in addition to whatever sits on to_coord; based on board_state
+# rather than the destinations _add_battering_ram_destination generated, so it
+# also naturally covers the AI ever capturing with a Rook while this is
+# pending (not currently possible — the effect is human-only — but this way
+# the two can't drift out of sync if that ever changes).
+func _resolve_battering_ram_pierce(from_coord: String, to_coord: String, moving_symbol: String) -> String:
+    if not pending_battering_ram or moving_symbol != "♖":
+        return ""
+    var dir: Vector2i = _rook_direction(from_coord, to_coord)
+    if dir == Vector2i.ZERO:
+        return ""
+    var to_file: int = _file_to_index(to_coord.substr(0, 1))
+    var to_rank: int = int(to_coord.substr(1)) - 1
+    var x: int = _file_to_index(from_coord.substr(0, 1)) + dir.x
+    var y: int = int(from_coord.substr(1)) - 1 + dir.y
+    while x != to_file or y != to_rank:
+        var coord: String = _index_to_coord(x, y)
+        if board_state.has(coord):
+            return coord
+        x += dir.x
+        y += dir.y
+    return ""
 
 # Hot path used by get_all_legal_moves/_has_any_legal_move, which is called at
 # every node of the AI's search tree. A piece that isn't the king, isn't on
