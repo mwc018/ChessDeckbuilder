@@ -28,10 +28,23 @@ One copy of each of the following (10 cards total):
 
 **Not in the starting deck:** Square Dance, Strafe, Homecoming, Withdrawal,
 Absolution, Return to Court, and Royal Recall — all fully working and
-registered, just not dealt at game start (the five "return to starting
-square" cards are likely candidates for the same eventual "find it later"
-mechanic as Square Dance, once that exists; Strafe is just being held back
-for now).
+registered, just not dealt at game start. Strafe is just being held back
+for now; the other six are the victory-screen reward pool (see below) —
+that "find it later" mechanic now exists.
+
+## Winning a match: the card draft
+
+Winning (checkmate, or the "Win (Debug)" button in the corner of the match
+screen while that's still around for testing) shows a victory screen
+offering up to 3 cards drawn from `Match.REWARD_POOL_CARD_NAMES` — exactly
+the six cards held back from the starting deck above. Cards already
+drafted this run are excluded from future offers, so the pool only shrinks;
+once it's empty, winning just starts the next match with no draft screen.
+Clicking a card lets you Confirm (adds it to the run's deck,
+`Match.run_deck_card_names`, and starts a new match) or Cancel (back to all
+3 choices); Skip starts a new match with the deck unchanged. The drafted
+deck persists for the rest of the run — every match after a draft is dealt
+from the updated list, not the original starting deck.
 
 ## All cards
 

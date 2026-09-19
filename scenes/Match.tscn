@@ -4,6 +4,18 @@
 [ext_resource type="PackedScene" path="res://scenes/Board.tscn" id="1_7x2s4"]
 [ext_resource type="PackedScene" path="res://scenes/EnergyDisplay.tscn" id="3_energy"]
 
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_debugwin"]
+bg_color = Color(0.62, 0.14, 0.14, 1)
+border_color = Color(1, 1, 1, 0.6)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+
 [node name="Match" type="Control" unique_id=426470950]
 layout_mode = 3
 anchors_preset = 15
@@ -34,6 +46,17 @@ size = Vector2(140, 50)
 theme_override_colors/font_color = Color(0.75, 0.75, 0.75, 1)
 theme_override_font_sizes/font_size = 14
 horizontal_alignment = 1
+
+[node name="DebugWinButton" type="Button" parent="."]
+layout_mode = 0
+offset_left = 16.0
+offset_top = 16.0
+offset_right = 140.0
+offset_bottom = 52.0
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 14
+theme_override_styles/normal = SubResource("StyleBoxFlat_debugwin")
+text = "Win (Debug)"
 
 [node name="StatusLabel" type="Label" parent="." unique_id=368646780]
 layout_mode = 1

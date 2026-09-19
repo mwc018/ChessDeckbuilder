@@ -6,6 +6,9 @@ signal energy_changed(energy: int, max_energy: int)
 # Fired exactly when control returns to the player (after the AI's move) —
 # lets whoever owns the hand (Match) know it's time to draw a fresh 5 cards.
 signal turn_started
+# Fired on a real win (checkmate) or a debug_win() call — lets Match show
+# the victory/card-draft screen.
+signal match_won
 
 const FILES: PackedStringArray = ["a", "b", "c", "d", "e", "f", "g", "h"]
 const STARTING_LAYOUT := {
@@ -508,9 +511,9 @@ func _drop_data(_at_position: Vector2, data: Variant) -> void:
 # instances and the registry mapping a card name to its scene). Board only
 # ever deals in card-name strings — see draw_pile/discard_pile above. ---
 
-# Called once by Match after wiring signals, with the full list of card
-# names that exist (i.e. CARD_SCENES.keys()) — a singleton deck, one copy of
-# each unique card, not multiple copies of the same one.
+# Called once by Match after wiring signals, with the run's current deck
+# (RunState.deck_card_names) — a singleton deck, one copy of each unique
+# card, not multiple copies of the same one.
 func initialize_deck(card_names: Array) -> void:
     draw_pile.clear()
     draw_pile.append_array(card_names)
@@ -569,6 +572,17 @@ func end_turn() -> void:
     _set_piece_selection_state()
     current_turn = ai_color
     _update_status()
+
+# Debug-only: immediately ends the match as a win, bypassing the actual
+# board state entirely, so the victory/card-draft flow can be tested
+# without having to play out and win a full game. Mirrors exactly what
+# _update_status() does on a real win.
+func debug_win() -> void:
+    if game_over:
+        return
+    game_over = true
+    _set_status("You win!")
+    match_won.emit()
 
 # Dispatches by card name to whatever rule change that card makes. Cards
 # with no effect implemented yet still play (leave the hand) — they just
@@ -1078,6 +1092,7 @@ func _update_status() -> void:
             _set_status("You lose")
         else:
             _set_status("You win!")
+            match_won.emit()
         return
 
     game_over = false

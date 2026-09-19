@@ -18,6 +18,11 @@ config/name="Chess Deckbuilder"
 run/main_scene="res://scenes/Match.tscn"
 config/features=PackedStringArray("4.6")
 
+[autoload]
+
+CardCatalog="*res://scripts/CardCatalog.gd"
+RunState="*res://scripts/RunState.gd"
+
 [display]
 
 window/size/viewport_width=1280

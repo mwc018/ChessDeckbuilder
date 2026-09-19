@@ -11,51 +11,16 @@ const RESERVED_BOTTOM_HEIGHT: float = 340.0
 @onready var hand_container: Control = $Hand
 @onready var end_turn_button: Button = $EndTurnButton
 @onready var pile_label: Label = $PileLabel
+@onready var debug_win_button: Button = $DebugWinButton
 
 const ENERGY_DISPLAY_GAP: float = 24.0
 const END_TURN_BUTTON_GAP: float = 24.0
 
-# The only place that maps a card's name to its scene. Every card that
-# exists gets an entry here, whether or not it's in the starting deck below
-# — Match needs to know the scene for any name Board might ever hand back
-# (e.g. a card found mid-run later on). Board only ever deals in names (see
-# draw_pile/discard_pile there); it has no idea these scenes exist.
-const CARD_SCENES: Dictionary = {
-    "Overextend": preload("res://scenes/cards/Overextend.tscn"),
-    "Battering Ram": preload("res://scenes/cards/BatteringRam.tscn"),
-    "Stride": preload("res://scenes/cards/Stride.tscn"),
-    "Square Dance": preload("res://scenes/cards/SquareDance.tscn"),
-    "Gallop": preload("res://scenes/cards/Gallop.tscn"),
-    "Trample": preload("res://scenes/cards/Trample.tscn"),
-    "Sidestep": preload("res://scenes/cards/Sidestep.tscn"),
-    "Free Rein": preload("res://scenes/cards/FreeRein.tscn"),
-    "Open Gate": preload("res://scenes/cards/OpenGate.tscn"),
-    "Divine Exception": preload("res://scenes/cards/DivineException.tscn"),
-    "Leap of Faith": preload("res://scenes/cards/LeapOfFaith.tscn"),
-    "Strafe": preload("res://scenes/cards/Strafe.tscn"),
-    "Homecoming": preload("res://scenes/cards/Homecoming.tscn"),
-    "Withdrawal": preload("res://scenes/cards/Withdrawal.tscn"),
-    "Absolution": preload("res://scenes/cards/Absolution.tscn"),
-    "Return to Court": preload("res://scenes/cards/ReturnToCourt.tscn"),
-    "Royal Recall": preload("res://scenes/cards/RoyalRecall.tscn"),
-}
-
-# The singleton starting deck — one copy of each card the player begins
-# with. Square Dance is deliberately left out: it's a card found later in a
-# run rather than something every game starts with (that "find it later"
-# mechanic doesn't exist yet, so for now it's simply not dealt at all). The
-# five "return to starting square" cards (Homecoming/Withdrawal/Absolution/
-# Return to Court/Royal Recall) are left out too, and so is Strafe — they
-# stay registered in CARD_SCENES above and fully working, just not part of
-# the starting deck.
-const STARTING_DECK_CARD_NAMES: Array[String] = [
-    "Overextend", "Battering Ram", "Stride", "Gallop", "Trample", "Sidestep", "Free Rein", "Open Gate", "Divine Exception", "Leap of Faith",
-]
+const MATCH_SCENE_PATH: String = "res://scenes/Match.tscn"
+const VICTORY_SCENE_PATH: String = "res://scenes/Victory.tscn"
 
 # AI difficulty is randomized per game within board.ai_difficulty_min/max
 # (set in the editor on the Board node) — see Board.randomize_ai_difficulty().
-# Match number is just a play counter; it no longer drives difficulty.
-var match_number: int = 1
 
 func _ready() -> void:
     _center_board()
@@ -64,7 +29,8 @@ func _ready() -> void:
         board.card_played.connect(_on_card_played)
         board.energy_changed.connect(_on_energy_changed)
         board.turn_started.connect(_on_turn_started)
-        board.initialize_deck(STARTING_DECK_CARD_NAMES)
+        board.match_won.connect(_on_match_won)
+        board.initialize_deck(RunState.deck_card_names)
         _on_board_status_changed(board.last_status_text)
         _on_energy_changed(board.energy, board.MAX_ENERGY)
         # The game starts on the player's turn already, so turn_started never
@@ -73,6 +39,8 @@ func _ready() -> void:
         _on_turn_started()
     if end_turn_button != null:
         end_turn_button.pressed.connect(_on_end_turn_pressed)
+    if debug_win_button != null and board != null:
+        debug_win_button.pressed.connect(board.debug_win)
     _update_progress_label()
 
 func _on_board_status_changed(text: String) -> void:
@@ -98,11 +66,33 @@ func _on_turn_started() -> void:
     if board == null or hand_container == null:
         return
     for card_name in board.draw_card_names(5):
-        var scene: PackedScene = CARD_SCENES.get(card_name)
+        var scene: PackedScene = CardCatalog.CARD_SCENES.get(card_name)
         if scene == null:
             continue
         hand_container.add_child(scene.instantiate())
     _update_pile_label()
+
+# Fired by Board on a win (real checkmate or the debug win button). Offers
+# up to 3 cards drawn from CardCatalog.REWARD_POOL_CARD_NAMES, excluding
+# whatever's already in RunState.deck_card_names (no offering a duplicate
+# of something already drafted). If nothing's left in the pool, skip the
+# draft screen entirely and go straight to the next match. This changes
+# scenes to Victory.tscn (rather than showing it as an overlay) so the
+# board/hand aren't visible — and distracting — behind it.
+func _on_match_won() -> void:
+    var eligible: Array[String] = []
+    for card_name in CardCatalog.REWARD_POOL_CARD_NAMES:
+        if not (card_name in RunState.deck_card_names):
+            eligible.append(card_name)
+    if eligible.is_empty():
+        # Nothing left in the reward pool — skip the draft screen entirely
+        # and go straight into the next match.
+        RunState.advance_to_new_match()
+        get_tree().change_scene_to_file(MATCH_SCENE_PATH)
+        return
+    eligible.shuffle()
+    RunState.pending_reward_offer = eligible.slice(0, min(3, eligible.size()))
+    get_tree().change_scene_to_file(VICTORY_SCENE_PATH)
 
 # The End Turn button: whatever's left in hand is discarded (not played —
 # freed directly rather than via confirm_played(), so no card effect
@@ -129,7 +119,7 @@ func _update_pile_label() -> void:
 func _update_progress_label() -> void:
     if progress_label == null or board == null:
         return
-    progress_label.text = "Match %d — AI difficulty %d%%" % [match_number, int(round(board.ai_difficulty * 100.0))]
+    progress_label.text = "Match %d — AI difficulty %d%%" % [RunState.match_number, int(round(board.ai_difficulty * 100.0))]
 
 func _notification(what: int) -> void:
     if what == NOTIFICATION_RESIZED:

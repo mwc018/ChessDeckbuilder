@@ -5,6 +5,12 @@ extends Control
 # the card being played before the node disappears.
 signal played
 
+# Emitted on a plain click — a press immediately followed by a release with
+# no drag in between. Unused by the hand (which only ever drags a card to
+# play it), but needed by anything that wants "click to select" instead,
+# like the victory screen's card draft.
+signal clicked
+
 enum CardType { ACTION, MODIFIER, POWER }
 
 const CARD_TYPE_LABELS := {
@@ -251,9 +257,15 @@ var _preview: Control = null
 # point the mouse has already moved a bit from where the card was grabbed).
 func _gui_input(event: InputEvent) -> void:
     if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
-        _pressed = event.pressed
         if event.pressed:
+            _pressed = true
             _press_local_pos = event.position
+        else:
+            # A release while _pressed was still true (never cleared by a
+            # drag starting) means this was a plain click, not a drag.
+            if _pressed:
+                clicked.emit()
+            _pressed = false
         return
 
     if _pressed and not _is_drag_source and event is InputEventMouseMotion and (event.button_mask & MOUSE_BUTTON_MASK_LEFT):
