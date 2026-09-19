@@ -1,0 +1,10 @@
+[gd_scene format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/Card.tscn" id="1_card"]
+
+[node name="Absolution" instance=ExtResource("1_card")]
+card_name = "Absolution"
+cost = 1
+card_type = 0
+description = "The next Bishop to move may only return to its starting square, without spending your one action for the turn."
+flavor_text = "\"It came back to where it was forgiven.\""

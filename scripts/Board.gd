@@ -129,6 +129,14 @@ var pending_trample: bool = false
 # an ACTION-type card, not a Modifier.
 var pending_sidestep: bool = false
 
+# Set by playing the Strafe card; lets the human's own next pawn move step
+# onto either diagonally-forward square even when it's empty (see
+# _add_strafe_destinations/_move_piece's strafe branch) — normally a pawn
+# can only reach those two squares by capturing. Same "next move only"
+# window as the other next-move cards. A Modifier card, not an ACTION —
+# unlike Sidestep this does spend the player's one action for the turn.
+var pending_strafe: bool = false
+
 # Set by playing the Free Rein card; lets the human's own next Knight move
 # happen without spending the player's one action for the turn — unlike
 # Square Dance/Sidestep it doesn't add any new destinations, the Knight
@@ -137,6 +145,48 @@ var pending_sidestep: bool = false
 # move only" window as the other next-move cards. An ACTION-type card, not
 # a Modifier.
 var pending_free_rein: bool = false
+
+# Set by playing the Homecoming card; the human's own next Knight to move
+# has its normal destinations replaced entirely with whichever of its
+# side's two starting squares (b1/g1 for White) are currently empty (see
+# _add_homecoming_destinations) — it can go home and nowhere else. Since
+# that's the only kind of move it can make, that move is exempt from
+# spending the player's one action for the turn (see _move_piece/
+# _restrict_to_action_exempt_destinations). Same "next move only" window as
+# the other next-move cards. An ACTION-type card, not a Modifier.
+var pending_homecoming: bool = false
+
+# Set by playing the Withdrawal card; same idea as Homecoming but for a
+# Rook — its next move's destinations are replaced entirely with whichever
+# of its side's two starting squares (a1/h1 for White) are currently empty
+# (see _add_withdrawal_destinations), and that move is exempt from spending
+# the player's one action. Same "next move only" window as the other
+# next-move cards. An ACTION-type card, not a Modifier.
+var pending_withdrawal: bool = false
+
+# Set by playing the Absolution card; same idea as Homecoming but for a
+# Bishop — its next move's destinations are replaced entirely with whichever
+# of its side's two starting squares (c1/f1 for White) are currently empty
+# (see _add_absolution_destinations), and that move is exempt from spending
+# the player's one action. Same "next move only" window as the other
+# next-move cards. An ACTION-type card, not a Modifier.
+var pending_absolution: bool = false
+
+# Set by playing the Return to Court card; same idea as Homecoming but for
+# the Queen — its next move's destinations are replaced entirely with its
+# one starting square (d1 for White) if empty (see
+# _add_return_to_court_destinations), and that move is exempt from spending
+# the player's one action. Same "next move only" window as the other
+# next-move cards. An ACTION-type card, not a Modifier.
+var pending_return_to_court: bool = false
+
+# Set by playing the Royal Recall card; same idea as Homecoming but for the
+# King — its next move's destinations are replaced entirely with its one
+# starting square (e1 for White) if empty (see
+# _add_royal_recall_destinations), and that move is exempt from spending
+# the player's one action. Same "next move only" window as the other
+# next-move cards. An ACTION-type card, not a Modifier.
+var pending_royal_recall: bool = false
 
 # Set by playing the Open Gate card; lets the human's own next Rook move
 # happen without spending the player's one action for the turn — same idea
@@ -240,7 +290,13 @@ func reset_game() -> void:
     pending_square_dance = false
     pending_trample = false
     pending_sidestep = false
+    pending_strafe = false
     pending_free_rein = false
+    pending_homecoming = false
+    pending_withdrawal = false
+    pending_absolution = false
+    pending_return_to_court = false
+    pending_royal_recall = false
     pending_open_gate = false
     pending_divine_exception = false
     pending_battering_ram = false
@@ -496,7 +552,13 @@ func end_turn() -> void:
     pending_square_dance = false
     pending_trample = false
     pending_sidestep = false
+    pending_strafe = false
     pending_free_rein = false
+    pending_homecoming = false
+    pending_withdrawal = false
+    pending_absolution = false
+    pending_return_to_court = false
+    pending_royal_recall = false
     pending_open_gate = false
     pending_divine_exception = false
     pending_battering_ram = false
@@ -522,8 +584,20 @@ func _apply_card_effect(card_name: String) -> void:
         pending_trample = true
     elif card_name == "Sidestep" and current_turn == PLAYER_COLOR:
         pending_sidestep = true
+    elif card_name == "Strafe" and current_turn == PLAYER_COLOR:
+        pending_strafe = true
     elif card_name == "Free Rein" and current_turn == PLAYER_COLOR:
         pending_free_rein = true
+    elif card_name == "Homecoming" and current_turn == PLAYER_COLOR:
+        pending_homecoming = true
+    elif card_name == "Withdrawal" and current_turn == PLAYER_COLOR:
+        pending_withdrawal = true
+    elif card_name == "Absolution" and current_turn == PLAYER_COLOR:
+        pending_absolution = true
+    elif card_name == "Return to Court" and current_turn == PLAYER_COLOR:
+        pending_return_to_court = true
+    elif card_name == "Royal Recall" and current_turn == PLAYER_COLOR:
+        pending_royal_recall = true
     elif card_name == "Open Gate" and current_turn == PLAYER_COLOR:
         pending_open_gate = true
     elif card_name == "Divine Exception" and current_turn == PLAYER_COLOR:
@@ -729,6 +803,24 @@ func _move_piece(from_coord: String, to_coord: String, promotion_symbol: String 
         _finish_move(moving_symbol, true)
         return
 
+    # Strafe: a pawn move onto an empty, different-file square is normally
+    # only ever a real en passant capture (see the comment below) — the one
+    # exception is a Strafe move onto a diagonally-forward square that
+    # *isn't* the current en_passant_target (only _add_strafe_destinations
+    # ever offers such a square, so this can't be confused with a real
+    # capture). Handled as its own short-circuit for the same reason as
+    # Sidestep: the en passant check just below would otherwise misfire on
+    # it and erase whatever happens to be sitting on an unrelated square.
+    var is_strafe_move: bool = is_pawn_mover and to_symbol == "" and to_coord.substr(0, 1) != from_coord.substr(0, 1) and to_coord != en_passant_target
+    if is_strafe_move:
+        _update_castle_rights_for_move(from_coord, to_coord)
+        _relocate_piece_node(from_coord, to_coord)
+        en_passant_target = ""
+        if promotion_symbol != "":
+            _apply_promotion(to_coord, promotion_symbol)
+        _finish_move(moving_symbol)
+        return
+
     if piece_nodes.has(to_coord):
         var captured: Control = piece_nodes[to_coord]
         if captured != null:
@@ -737,10 +829,11 @@ func _move_piece(from_coord: String, to_coord: String, promotion_symbol: String 
 
     var is_king: bool = moving_symbol == "♔" or moving_symbol == "♚"
     var rook_move: Dictionary = CASTLE_ROOK_MOVES.get(from_coord + to_coord, {}) if is_king else {}
-    # A pawn moving diagonally onto an empty square can only be an en passant
-    # capture — a normal diagonal pawn move is always onto an occupied square.
-    # (A same-rank, different-file, empty-target pawn move is a Sidestep
-    # instead — already handled and returned above, never reaches here.)
+    # A pawn moving diagonally onto an empty square that IS the current
+    # en_passant_target can only be a real en passant capture (a Strafe move
+    # onto any other empty diagonal square is already handled and returned
+    # above, and a same-rank sidestep above that) — a normal diagonal pawn
+    # move is otherwise always onto an occupied square.
     var is_en_passant_capture: bool = is_pawn_mover and from_coord.substr(0, 1) != to_coord.substr(0, 1) and not board_state.has(to_coord)
     var en_passant_capture_coord: String = to_coord.substr(0, 1) + from_coord.substr(1) if is_en_passant_capture else ""
     var next_en_passant_target: String = _compute_en_passant_target(from_coord, to_coord, moving_symbol)
@@ -769,15 +862,30 @@ func _move_piece(from_coord: String, to_coord: String, promotion_symbol: String 
     if promotion_symbol != "":
         _apply_promotion(to_coord, promotion_symbol)
 
-    # Free Rein/Open Gate/Divine Exception: a normal Knight/Rook/Bishop move
-    # needs no special handling of its own (unlike Square Dance/Sidestep
-    # they grant no new destinations, so the move already went through all
-    # the capture/etc. logic above like any other move) — it just needs to
-    # skip spending the action once it's done.
+    # Free Rein/Homecoming/Withdrawal/Absolution/Open Gate/Divine Exception:
+    # a normal Knight/Rook/Bishop/Queen/King move needs no special handling
+    # of its own — a Homecoming/Withdrawal/Absolution/Return to Court/Royal
+    # Recall destination is just an empty square like any other, no capture/
+    # castle/en passant/promotion rule treats it differently (Royal Recall's
+    # destination is always e1/e8, which never matches a CASTLE_ROOK_MOVES
+    # key — those all require the king starting from e1/e8, not returning to
+    # it), so the move already went through all that logic above like any
+    # other move — it just needs to skip spending the action once it's done.
     var is_free_rein_knight_move: bool = pending_free_rein and moving_symbol == "♘"
+    var is_homecoming_knight_move: bool = pending_homecoming and moving_symbol == "♘"
+    var is_withdrawal_rook_move: bool = pending_withdrawal and moving_symbol == "♖"
+    var is_absolution_bishop_move: bool = pending_absolution and moving_symbol == "♗"
+    var is_return_to_court_queen_move: bool = pending_return_to_court and moving_symbol == "♕"
+    var is_royal_recall_king_move: bool = pending_royal_recall and moving_symbol == "♔"
     var is_open_gate_rook_move: bool = pending_open_gate and moving_symbol == "♖"
     var is_divine_exception_bishop_move: bool = pending_divine_exception and moving_symbol == "♗"
-    _finish_move(moving_symbol, is_free_rein_knight_move or is_open_gate_rook_move or is_divine_exception_bishop_move)
+    var is_action_exempt_move: bool = (
+        is_free_rein_knight_move or is_homecoming_knight_move or
+        is_withdrawal_rook_move or is_absolution_bishop_move or
+        is_return_to_court_queen_move or is_royal_recall_king_move or
+        is_open_gate_rook_move or is_divine_exception_bishop_move
+    )
+    _finish_move(moving_symbol, is_action_exempt_move)
 
 # Shared end-of-move bookkeeping: clears the current selection/highlights,
 # consumes whichever "next move" card effects applied to this move, and
@@ -795,7 +903,8 @@ func _finish_move(moving_symbol: String, is_action_exempt: bool = false) -> void
     _clear_move_highlights()
     _set_piece_selection_state()
 
-    # The Overextend/Stride/Square Dance/Trample/Sidestep/Free Rein/Open
+    # The Overextend/Stride/Square Dance/Trample/Sidestep/Strafe/Free Rein/
+    # Homecoming/Withdrawal/Absolution/Return to Court/Royal Recall/Open
     # Gate/Divine Exception windows only ever cover the player's very next
     # move — win or lose the bonus, it's spent once that move (this one)
     # happens.
@@ -805,7 +914,13 @@ func _finish_move(moving_symbol: String, is_action_exempt: bool = false) -> void
         pending_square_dance = false
         pending_trample = false
         pending_sidestep = false
+        pending_strafe = false
         pending_free_rein = false
+        pending_homecoming = false
+        pending_withdrawal = false
+        pending_absolution = false
+        pending_return_to_court = false
+        pending_royal_recall = false
         pending_open_gate = false
         pending_divine_exception = false
         # Battering Ram, Gallop, and Leap of Faith each wait for the next
@@ -1120,12 +1235,24 @@ func _collect_legal_moves_for_piece(symbol: String, from_coord: String, state: D
         _add_trample_destination(from_coord, state, is_white, result)
     if pending_sidestep and symbol == "♙":
         _add_sidestep_destinations(from_coord, state, is_white, result)
+    if pending_strafe and symbol == "♙":
+        _add_strafe_destinations(from_coord, state, is_white, result)
     if pending_battering_ram and symbol == "♖":
         _add_battering_ram_destination(from_coord, state, is_white, result)
+    if pending_withdrawal and symbol == "♖":
+        _add_withdrawal_destinations(from_coord, state, is_white, result)
     if pending_gallop and symbol == "♘":
         _add_gallop_destinations(from_coord, state, is_white, result)
+    if pending_homecoming and symbol == "♘":
+        _add_homecoming_destinations(from_coord, state, is_white, result)
     if pending_leap_of_faith and symbol == "♗":
         _add_leap_of_faith_destinations(from_coord, state, is_white, result)
+    if pending_absolution and symbol == "♗":
+        _add_absolution_destinations(from_coord, state, is_white, result)
+    if pending_return_to_court and symbol == "♕":
+        _add_return_to_court_destinations(from_coord, state, is_white, result)
+    if pending_royal_recall and symbol == "♔":
+        _add_royal_recall_destinations(from_coord, state, is_white, result)
     if actions_remaining <= 0:
         _restrict_to_action_exempt_destinations(symbol, from_coord, state, is_white, result)
     return result
@@ -1138,14 +1265,29 @@ func _collect_legal_moves_for_piece(symbol: String, from_coord: String, state: D
 # every destination it has (Free Rein exempts the whole move rather than
 # specific destinations, since it grants no new ones — a Knight just moves
 # normally, and likewise for a Rook while Open Gate is pending, or a Bishop
-# while Divine Exception is pending). The swap/sidestep predicates are
-# exactly what _move_piece itself uses to detect each move type, so this
-# can't drift out of sync with what actually gets treated as exempt there.
-# Every other destination this function generated would consume an action
-# the player no longer has. Paths are cleared too since none of these
-# exempt moves are a slide.
+# while Divine Exception is pending). Homecoming/Withdrawal/Absolution/
+# Return to Court/Royal Recall need the same "keep everything" treatment for
+# a different reason: by the time this runs, that piece's destinations have
+# already been replaced entirely with its (empty) starting square(s) — see
+# _replace_with_home_square_destinations — so every destination left really
+# is exempt and none of it should be stripped by the generic swap/sidestep
+# check below. The swap/sidestep predicates are exactly what _move_piece
+# itself uses to detect each move type, so this can't drift out of sync with
+# what actually gets treated as exempt there. Every other destination this
+# function generated would consume an action the player no longer has.
+# Paths are cleared too since none of these exempt moves are a slide.
 func _restrict_to_action_exempt_destinations(symbol: String, from_coord: String, state: Dictionary, is_white: bool, result: Dictionary) -> void:
     if pending_free_rein and symbol == "♘":
+        return
+    if pending_homecoming and symbol == "♘":
+        return
+    if pending_withdrawal and symbol == "♖":
+        return
+    if pending_absolution and symbol == "♗":
+        return
+    if pending_return_to_court and symbol == "♕":
+        return
+    if pending_royal_recall and symbol == "♔":
         return
     if pending_open_gate and symbol == "♖":
         return
@@ -1195,11 +1337,59 @@ func _add_gallop_destinations(from_coord: String, state: Dictionary, is_white: b
             continue
         if state.has(coord) and _is_white_piece(state[coord]) == is_white:
             continue
+        if state.has(coord) and _is_king(state[coord]):
+            continue
         if _move_leaves_king_in_check(from_coord, coord, is_white, state):
             continue
         destinations.append(coord)
 
     result["destinations"] = destinations
+
+# Shared by Homecoming/Withdrawal/Absolution: REPLACES a piece's
+# destinations entirely with whichever of its side's two given starting
+# squares are currently empty — unlike every other _add_*_destinations
+# helper, which adds to the destinations a piece already has, this one
+# deliberately discards them, since the whole point of these cards is "only
+# home, nowhere else." The square the piece is already standing on is
+# skipped (nothing to "return" to) — if that leaves nothing, this piece
+# simply has no legal moves at all this turn. Only reachable from
+# _collect_legal_moves_for_piece (the human preview/selection entry point),
+# never from the AI/attack-detection paths, so this can't affect the AI's
+# search or leak the bonus onto the opponent's pieces.
+func _replace_with_home_square_destinations(from_coord: String, state: Dictionary, is_white: bool, result: Dictionary, white_home_squares: Array, black_home_squares: Array) -> void:
+    # Not a ternary — white_home_squares if is_white else black_home_squares
+    # evaluates to an untyped Array at runtime, which fails when assigned
+    # into an Array[String] variable.
+    var home_squares: Array[String] = []
+    if is_white:
+        home_squares.append_array(white_home_squares)
+    else:
+        home_squares.append_array(black_home_squares)
+    var destinations: Array[String] = []
+    for home_coord in home_squares:
+        if home_coord == from_coord or _piece_exists_at(home_coord, state):
+            continue
+        if _move_leaves_king_in_check(from_coord, home_coord, is_white, state):
+            continue
+        destinations.append(home_coord)
+    result["destinations"] = destinations
+    var no_paths: Array[String] = []
+    result["paths"] = no_paths
+
+func _add_homecoming_destinations(from_coord: String, state: Dictionary, is_white: bool, result: Dictionary) -> void:
+    _replace_with_home_square_destinations(from_coord, state, is_white, result, ["b1", "g1"], ["b8", "g8"])
+
+func _add_withdrawal_destinations(from_coord: String, state: Dictionary, is_white: bool, result: Dictionary) -> void:
+    _replace_with_home_square_destinations(from_coord, state, is_white, result, ["a1", "h1"], ["a8", "h8"])
+
+func _add_absolution_destinations(from_coord: String, state: Dictionary, is_white: bool, result: Dictionary) -> void:
+    _replace_with_home_square_destinations(from_coord, state, is_white, result, ["c1", "f1"], ["c8", "f8"])
+
+func _add_return_to_court_destinations(from_coord: String, state: Dictionary, is_white: bool, result: Dictionary) -> void:
+    _replace_with_home_square_destinations(from_coord, state, is_white, result, ["d1"], ["d8"])
+
+func _add_royal_recall_destinations(from_coord: String, state: Dictionary, is_white: bool, result: Dictionary) -> void:
+    _replace_with_home_square_destinations(from_coord, state, is_white, result, ["e1"], ["e8"])
 
 # Leap of Faith: for each of the 4 diagonals, finds the first occupied
 # square (the blocker — friend or foe, it doesn't matter which) and, if
@@ -1242,7 +1432,7 @@ func _add_leap_of_faith_destinations(from_coord: String, state: Dictionary, is_w
         while x >= 0 and x < 8 and y >= 0 and y < 8:
             var coord: String = _index_to_coord(x, y)
             if state.has(coord):
-                if _is_white_piece(state[coord]) != is_white:
+                if _is_white_piece(state[coord]) != is_white and not _is_king(state[coord]):
                     reached.append(coord)
                 break
             reached.append(coord)
@@ -1389,6 +1579,8 @@ func _add_trample_destination(from_coord: String, state: Dictionary, is_white: b
         return
     if _is_white_piece(_piece_symbol_at(ahead_coord, state)) == is_white:
         return
+    if _is_king(_piece_symbol_at(ahead_coord, state)):
+        return
     var destinations: Array[String] = result.get("destinations", [])
     if ahead_coord in destinations:
         return
@@ -1416,6 +1608,27 @@ func _add_sidestep_destinations(from_coord: String, state: Dictionary, is_white:
         if _move_leaves_king_in_check(from_coord, side_coord, is_white, state):
             continue
         destinations.append(side_coord)
+    result["destinations"] = destinations
+
+# Strafe: adds the two diagonally-forward squares (the same two squares a
+# capture would normally use) as destinations when they're empty — a pawn
+# can otherwise only ever reach those squares by capturing, never step onto
+# an empty one. Only reachable from _collect_legal_moves_for_piece (the
+# human preview/selection entry point), never from the AI/attack-detection
+# paths, so this can't affect the AI's search or leak the bonus onto the
+# opponent's pawns.
+func _add_strafe_destinations(from_coord: String, state: Dictionary, is_white: bool, result: Dictionary) -> void:
+    var file_char: String = from_coord.substr(0, 1)
+    var rank_number: int = int(from_coord.substr(1))
+    var direction: int = 1 if is_white else -1
+    var destinations: Array[String] = result.get("destinations", [])
+    for offset in [-1, 1]:
+        var diag_coord: String = _advance_coord(file_char, rank_number, offset, direction)
+        if diag_coord == "" or _piece_exists_at(diag_coord, state) or diag_coord in destinations:
+            continue
+        if _move_leaves_king_in_check(from_coord, diag_coord, is_white, state):
+            continue
+        destinations.append(diag_coord)
     result["destinations"] = destinations
 
 # Battering Ram: for each capturing destination the Rook already has, look
@@ -1447,7 +1660,7 @@ func _add_battering_ram_destination(from_coord: String, state: Dictionary, is_wh
         while x >= 0 and x < 8 and y >= 0 and y < 8:
             var coord: String = _index_to_coord(x, y)
             if state.has(coord):
-                if _is_white_piece(state[coord]) != is_white:
+                if _is_white_piece(state[coord]) != is_white and not _is_king(state[coord]):
                     var state_without_first_capture: Dictionary = state.duplicate()
                     state_without_first_capture.erase(first_capture)
                     if not _move_leaves_king_in_check(from_coord, coord, is_white, state_without_first_capture):
@@ -1765,6 +1978,20 @@ func _piece_symbol_at(coord: String, state: Dictionary) -> String:
 
 func _is_white_piece(symbol: String) -> bool:
     return ["♙", "♖", "♘", "♗", "♕", "♔"].has(symbol)
+
+# Used by the card-granted "extra capture" bonuses (Trample, Battering Ram,
+# Gallop, Leap of Faith) to refuse ever targeting a king. Those bonuses give
+# a piece a capturing reach _is_square_attacked doesn't know about (it's
+# built entirely on the plain, card-unaware _collect_moves_for_piece — see
+# the comments on those _add_*_destinations functions), so a king standing
+# in one of these expanded blast radii never registers as being in check —
+# the AI won't defend it and the game won't call checkmate. Without this,
+# that king would simply be capturable outright instead. This is the direct,
+# narrow fix for that; see the card audit that found it for the fuller
+# alternative (teaching check detection about these bonuses instead), not
+# pursued here since it would touch code shared with the AI's search.
+func _is_king(symbol: String) -> bool:
+    return symbol == "♔" or symbol == "♚"
 
 func _advance_coord(file_char: String, rank_number: int, file_offset: int, rank_offset: int) -> String:
     var file_index: int = _file_to_index(file_char)

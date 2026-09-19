@@ -32,12 +32,22 @@ const CARD_SCENES: Dictionary = {
     "Open Gate": preload("res://scenes/cards/OpenGate.tscn"),
     "Divine Exception": preload("res://scenes/cards/DivineException.tscn"),
     "Leap of Faith": preload("res://scenes/cards/LeapOfFaith.tscn"),
+    "Strafe": preload("res://scenes/cards/Strafe.tscn"),
+    "Homecoming": preload("res://scenes/cards/Homecoming.tscn"),
+    "Withdrawal": preload("res://scenes/cards/Withdrawal.tscn"),
+    "Absolution": preload("res://scenes/cards/Absolution.tscn"),
+    "Return to Court": preload("res://scenes/cards/ReturnToCourt.tscn"),
+    "Royal Recall": preload("res://scenes/cards/RoyalRecall.tscn"),
 }
 
 # The singleton starting deck — one copy of each card the player begins
 # with. Square Dance is deliberately left out: it's a card found later in a
 # run rather than something every game starts with (that "find it later"
-# mechanic doesn't exist yet, so for now it's simply not dealt at all).
+# mechanic doesn't exist yet, so for now it's simply not dealt at all). The
+# five "return to starting square" cards (Homecoming/Withdrawal/Absolution/
+# Return to Court/Royal Recall) are left out too, and so is Strafe — they
+# stay registered in CARD_SCENES above and fully working, just not part of
+# the starting deck.
 const STARTING_DECK_CARD_NAMES: Array[String] = [
     "Overextend", "Battering Ram", "Stride", "Gallop", "Trample", "Sidestep", "Free Rein", "Open Gate", "Divine Exception", "Leap of Faith",
 ]
