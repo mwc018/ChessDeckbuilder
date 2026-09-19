@@ -1,0 +1,10 @@
+[gd_scene format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/Card.tscn" id="1_card"]
+
+[node name="DivineException" instance=ExtResource("1_card")]
+card_name = "Divine Exception"
+cost = 2
+card_type = 0
+description = "The next Bishop to move does not spend your one action for the turn."
+flavor_text = "\"Even doctrine bends for the chosen.\""

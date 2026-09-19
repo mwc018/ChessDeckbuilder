@@ -29,6 +29,9 @@ const CARD_SCENES: Dictionary = {
     "Trample": preload("res://scenes/cards/Trample.tscn"),
     "Sidestep": preload("res://scenes/cards/Sidestep.tscn"),
     "Free Rein": preload("res://scenes/cards/FreeRein.tscn"),
+    "Open Gate": preload("res://scenes/cards/OpenGate.tscn"),
+    "Divine Exception": preload("res://scenes/cards/DivineException.tscn"),
+    "Leap of Faith": preload("res://scenes/cards/LeapOfFaith.tscn"),
 }
 
 # The singleton starting deck — one copy of each card the player begins
@@ -36,7 +39,7 @@ const CARD_SCENES: Dictionary = {
 # run rather than something every game starts with (that "find it later"
 # mechanic doesn't exist yet, so for now it's simply not dealt at all).
 const STARTING_DECK_CARD_NAMES: Array[String] = [
-    "Overextend", "Battering Ram", "Stride", "Gallop", "Trample", "Sidestep", "Free Rein",
+    "Overextend", "Battering Ram", "Stride", "Gallop", "Trample", "Sidestep", "Free Rein", "Open Gate", "Divine Exception", "Leap of Faith",
 ]
 
 # AI difficulty is randomized per game within board.ai_difficulty_min/max

@@ -138,6 +138,20 @@ var pending_sidestep: bool = false
 # a Modifier.
 var pending_free_rein: bool = false
 
+# Set by playing the Open Gate card; lets the human's own next Rook move
+# happen without spending the player's one action for the turn — same idea
+# as Free Rein but for a Rook (see _move_piece/_restrict_to_action_exempt_
+# destinations). Same "next move only" window as the other next-move cards.
+# An ACTION-type card, not a Modifier.
+var pending_open_gate: bool = false
+
+# Set by playing the Divine Exception card; lets the human's own next Bishop
+# move happen without spending the player's one action for the turn — same
+# idea as Free Rein/Open Gate but for a Bishop (see _move_piece/_restrict_
+# to_action_exempt_destinations). Same "next move only" window as the other
+# next-move cards. An ACTION-type card, not a Modifier.
+var pending_divine_exception: bool = false
+
 # Set by playing the Battering Ram card; lets the human's own next Rook move
 # that captures a piece continue through it and capture a second piece
 # further along the same line, if one is there to hit. Unlike Overextend this
@@ -154,6 +168,14 @@ var pending_battering_ram: bool = false
 # actually moving, not just the player's very next move — "the next Knight
 # to move" may not be it — but likewise never survives past end_turn().
 var pending_gallop: bool = false
+
+# Set by playing the Leap of Faith card; lets the human's own next Bishop
+# move jump over the first piece blocking its diagonal (whether friend or
+# foe) and keep sliding from beyond it, landing on an empty square or
+# capturing an enemy piece there (see _add_leap_of_faith_destinations). Like
+# Battering Ram/Gallop this waits for a Bishop actually moving, not just the
+# player's very next move, but likewise never survives past end_turn().
+var pending_leap_of_faith: bool = false
 
 # The resource cards cost to play. Refills to MAX_ENERGY at the start of
 # each of the player's turns; spent energy otherwise carries through the
@@ -219,8 +241,11 @@ func reset_game() -> void:
     pending_trample = false
     pending_sidestep = false
     pending_free_rein = false
+    pending_open_gate = false
+    pending_divine_exception = false
     pending_battering_ram = false
     pending_gallop = false
+    pending_leap_of_faith = false
     energy = MAX_ENERGY
     energy_changed.emit(energy, MAX_ENERGY)
     actions_remaining = MAX_ACTIONS
@@ -472,8 +497,11 @@ func end_turn() -> void:
     pending_trample = false
     pending_sidestep = false
     pending_free_rein = false
+    pending_open_gate = false
+    pending_divine_exception = false
     pending_battering_ram = false
     pending_gallop = false
+    pending_leap_of_faith = false
     selected_piece_coord = ""
     _clear_move_highlights()
     _set_piece_selection_state()
@@ -496,10 +524,16 @@ func _apply_card_effect(card_name: String) -> void:
         pending_sidestep = true
     elif card_name == "Free Rein" and current_turn == PLAYER_COLOR:
         pending_free_rein = true
+    elif card_name == "Open Gate" and current_turn == PLAYER_COLOR:
+        pending_open_gate = true
+    elif card_name == "Divine Exception" and current_turn == PLAYER_COLOR:
+        pending_divine_exception = true
     elif card_name == "Battering Ram" and current_turn == PLAYER_COLOR:
         pending_battering_ram = true
     elif card_name == "Gallop" and current_turn == PLAYER_COLOR:
         pending_gallop = true
+    elif card_name == "Leap of Faith" and current_turn == PLAYER_COLOR:
+        pending_leap_of_faith = true
 
 func _on_square_input(event: InputEvent, coord: String) -> void:
     if game_over or awaiting_promotion:
@@ -735,12 +769,15 @@ func _move_piece(from_coord: String, to_coord: String, promotion_symbol: String 
     if promotion_symbol != "":
         _apply_promotion(to_coord, promotion_symbol)
 
-    # Free Rein: a normal Knight move needs no special handling of its own
-    # (unlike Square Dance/Sidestep it grants no new destinations, so it
-    # already went through all the capture/etc. logic above like any other
-    # move) — it just needs to skip spending the action once it's done.
+    # Free Rein/Open Gate/Divine Exception: a normal Knight/Rook/Bishop move
+    # needs no special handling of its own (unlike Square Dance/Sidestep
+    # they grant no new destinations, so the move already went through all
+    # the capture/etc. logic above like any other move) — it just needs to
+    # skip spending the action once it's done.
     var is_free_rein_knight_move: bool = pending_free_rein and moving_symbol == "♘"
-    _finish_move(moving_symbol, is_free_rein_knight_move)
+    var is_open_gate_rook_move: bool = pending_open_gate and moving_symbol == "♖"
+    var is_divine_exception_bishop_move: bool = pending_divine_exception and moving_symbol == "♗"
+    _finish_move(moving_symbol, is_free_rein_knight_move or is_open_gate_rook_move or is_divine_exception_bishop_move)
 
 # Shared end-of-move bookkeeping: clears the current selection/highlights,
 # consumes whichever "next move" card effects applied to this move, and
@@ -758,9 +795,10 @@ func _finish_move(moving_symbol: String, is_action_exempt: bool = false) -> void
     _clear_move_highlights()
     _set_piece_selection_state()
 
-    # The Overextend/Stride/Square Dance/Trample/Sidestep/Free Rein windows
-    # only ever cover the player's very next move — win or lose the bonus,
-    # it's spent once that move (this one) happens.
+    # The Overextend/Stride/Square Dance/Trample/Sidestep/Free Rein/Open
+    # Gate/Divine Exception windows only ever cover the player's very next
+    # move — win or lose the bonus, it's spent once that move (this one)
+    # happens.
     if current_turn == PLAYER_COLOR:
         pending_overextend = false
         pending_stride = false
@@ -768,13 +806,18 @@ func _finish_move(moving_symbol: String, is_action_exempt: bool = false) -> void
         pending_trample = false
         pending_sidestep = false
         pending_free_rein = false
-        # Battering Ram and Gallop each wait for the next move of their own
-        # piece type specifically, however many other moves happen first —
-        # spent once that piece moves, whether or not the bonus was used.
+        pending_open_gate = false
+        pending_divine_exception = false
+        # Battering Ram, Gallop, and Leap of Faith each wait for the next
+        # move of their own piece type specifically, however many other
+        # moves happen first — spent once that piece moves, whether or not
+        # the bonus was used.
         if moving_symbol == "♖":
             pending_battering_ram = false
         if moving_symbol == "♘":
             pending_gallop = false
+        if moving_symbol == "♗":
+            pending_leap_of_faith = false
         if not is_action_exempt:
             actions_remaining = max(actions_remaining - 1, 0)
     elif current_turn == ai_color:
@@ -1081,6 +1124,8 @@ func _collect_legal_moves_for_piece(symbol: String, from_coord: String, state: D
         _add_battering_ram_destination(from_coord, state, is_white, result)
     if pending_gallop and symbol == "♘":
         _add_gallop_destinations(from_coord, state, is_white, result)
+    if pending_leap_of_faith and symbol == "♗":
+        _add_leap_of_faith_destinations(from_coord, state, is_white, result)
     if actions_remaining <= 0:
         _restrict_to_action_exempt_destinations(symbol, from_coord, state, is_white, result)
     return result
@@ -1092,13 +1137,19 @@ func _collect_legal_moves_for_piece(symbol: String, from_coord: String, state: D
 # pattern is unambiguous), or, for a Knight while Free Rein is pending,
 # every destination it has (Free Rein exempts the whole move rather than
 # specific destinations, since it grants no new ones — a Knight just moves
-# normally). The swap/sidestep predicates are exactly what _move_piece
-# itself uses to detect each move type, so this can't drift out of sync with
-# what actually gets treated as exempt there. Every other destination this
-# function generated would consume an action the player no longer has.
-# Paths are cleared too since none of these exempt moves are a slide.
+# normally, and likewise for a Rook while Open Gate is pending, or a Bishop
+# while Divine Exception is pending). The swap/sidestep predicates are
+# exactly what _move_piece itself uses to detect each move type, so this
+# can't drift out of sync with what actually gets treated as exempt there.
+# Every other destination this function generated would consume an action
+# the player no longer has. Paths are cleared too since none of these
+# exempt moves are a slide.
 func _restrict_to_action_exempt_destinations(symbol: String, from_coord: String, state: Dictionary, is_white: bool, result: Dictionary) -> void:
     if pending_free_rein and symbol == "♘":
+        return
+    if pending_open_gate and symbol == "♖":
+        return
+    if pending_divine_exception and symbol == "♗":
         return
     var is_pawn: bool = symbol == "♙" or symbol == "♟"
     var from_rank: String = from_coord.substr(1)
@@ -1149,6 +1200,72 @@ func _add_gallop_destinations(from_coord: String, state: Dictionary, is_white: b
         destinations.append(coord)
 
     result["destinations"] = destinations
+
+# Leap of Faith: for each of the 4 diagonals, finds the first occupied
+# square (the blocker — friend or foe, it doesn't matter which) and, if
+# there's anything on the board beyond it, treats it as jumped over and
+# keeps sliding from there exactly like a normal Bishop move would: every
+# empty square along the way is a destination, and the slide stops (adding
+# one final capturing destination) at the next occupied square, whether
+# that's an enemy piece to capture or a friendly one that blocks. The
+# blocker's own square is added as a path (not a destination — it's jumped
+# over, never landed on) purely so the jump reads visually as passing over
+# it. Only reachable from _collect_legal_moves_for_piece (the human preview/
+# selection entry point), never from the AI/attack-detection paths, so this
+# can't affect the AI's search or leak the bonus onto the opponent's bishops.
+func _add_leap_of_faith_destinations(from_coord: String, state: Dictionary, is_white: bool, result: Dictionary) -> void:
+    var destinations: Array[String] = result.get("destinations", [])
+    var paths: Array[String] = result.get("paths", [])
+    var file_index: int = _file_to_index(from_coord.substr(0, 1))
+    var rank_index: int = int(from_coord.substr(1)) - 1
+    var directions: Array[Vector2i] = [Vector2i(1, 1), Vector2i(1, -1), Vector2i(-1, 1), Vector2i(-1, -1)]
+
+    for dir in directions:
+        var x: int = file_index
+        var y: int = rank_index
+        var blocker_coord: String = ""
+        while true:
+            x += dir.x
+            y += dir.y
+            if x < 0 or x >= 8 or y < 0 or y >= 8:
+                break
+            var coord: String = _index_to_coord(x, y)
+            if state.has(coord):
+                blocker_coord = coord
+                break
+        if blocker_coord == "":
+            continue  # nothing blocks this diagonal — nothing to jump over
+
+        var reached: Array[String] = []
+        x += dir.x
+        y += dir.y
+        while x >= 0 and x < 8 and y >= 0 and y < 8:
+            var coord: String = _index_to_coord(x, y)
+            if state.has(coord):
+                if _is_white_piece(state[coord]) != is_white:
+                    reached.append(coord)
+                break
+            reached.append(coord)
+            x += dir.x
+            y += dir.y
+
+        if reached.is_empty():
+            continue  # the blocker was the last thing on the board this way
+
+        if not (blocker_coord in paths):
+            paths.append(blocker_coord)
+        for index in range(reached.size() - 1):
+            if not (reached[index] in paths):
+                paths.append(reached[index])
+        for coord in reached:
+            if coord in destinations:
+                continue
+            if _move_leaves_king_in_check(from_coord, coord, is_white, state):
+                continue
+            destinations.append(coord)
+
+    result["destinations"] = destinations
+    result["paths"] = paths
 
 # Square Dance: any friendly piece adjacent to this one (any of the 8
 # surrounding squares) can be swapped into, regardless of what this piece

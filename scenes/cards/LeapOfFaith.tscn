@@ -1,0 +1,10 @@
+[gd_scene format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/Card.tscn" id="1_card"]
+
+[node name="LeapOfFaith" instance=ExtResource("1_card")]
+card_name = "Leap of Faith"
+cost = 1
+card_type = 1
+description = "The next Bishop to move may jump over the first piece in its path and keep sliding."
+flavor_text = "\"Doubt is just faith that hasn't jumped yet.\""
