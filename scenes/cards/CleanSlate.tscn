@@ -1,0 +1,10 @@
+[gd_scene format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/Card.tscn" id="1_card"]
+
+[node name="CleanSlate" instance=ExtResource("1_card")]
+card_name = "Clean Slate"
+cost = 1
+card_type = 0
+description = "Discard the rest of your hand, then draw that many cards."
+flavor_text = "\"Burn the hand. Deal a new one.\""

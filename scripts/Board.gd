@@ -215,6 +215,14 @@ var pending_divine_exception: bool = false
 # Dance swap of some other piece), never into a future turn.
 var pending_battering_ram: bool = false
 
+# Set by playing the Drift card; lets the human's own next Rook move end
+# with one extra diagonal step beyond wherever its normal slide would have
+# stopped (see _add_drift_destinations). Same piece-type-specific window as
+# Battering Ram — waits for a Rook actually moving, not just the very next
+# move — and likewise never survives past end_turn(). A Modifier card, not
+# an ACTION — it spends the player's one action like any other Rook move.
+var pending_drift: bool = false
+
 # Set by playing the Gallop card; lets the human's own next Knight move
 # continue 1 additional square in any direction after a non-capturing leap
 # (see _add_gallop_destinations). Like Battering Ram this waits for a Knight
@@ -303,6 +311,7 @@ func reset_game() -> void:
     pending_open_gate = false
     pending_divine_exception = false
     pending_battering_ram = false
+    pending_drift = false
     pending_gallop = false
     pending_leap_of_faith = false
     energy = MAX_ENERGY
@@ -565,6 +574,7 @@ func end_turn() -> void:
     pending_open_gate = false
     pending_divine_exception = false
     pending_battering_ram = false
+    pending_drift = false
     pending_gallop = false
     pending_leap_of_faith = false
     selected_piece_coord = ""
@@ -618,6 +628,8 @@ func _apply_card_effect(card_name: String) -> void:
         pending_divine_exception = true
     elif card_name == "Battering Ram" and current_turn == PLAYER_COLOR:
         pending_battering_ram = true
+    elif card_name == "Drift" and current_turn == PLAYER_COLOR:
+        pending_drift = true
     elif card_name == "Gallop" and current_turn == PLAYER_COLOR:
         pending_gallop = true
     elif card_name == "Leap of Faith" and current_turn == PLAYER_COLOR:
@@ -937,12 +949,13 @@ func _finish_move(moving_symbol: String, is_action_exempt: bool = false) -> void
         pending_royal_recall = false
         pending_open_gate = false
         pending_divine_exception = false
-        # Battering Ram, Gallop, and Leap of Faith each wait for the next
-        # move of their own piece type specifically, however many other
-        # moves happen first — spent once that piece moves, whether or not
-        # the bonus was used.
+        # Battering Ram, Drift, Gallop, and Leap of Faith each wait for the
+        # next move of their own piece type specifically, however many
+        # other moves happen first — spent once that piece moves, whether
+        # or not the bonus was used.
         if moving_symbol == "♖":
             pending_battering_ram = false
+            pending_drift = false
         if moving_symbol == "♘":
             pending_gallop = false
         if moving_symbol == "♗":
@@ -1254,6 +1267,8 @@ func _collect_legal_moves_for_piece(symbol: String, from_coord: String, state: D
         _add_strafe_destinations(from_coord, state, is_white, result)
     if pending_battering_ram and symbol == "♖":
         _add_battering_ram_destination(from_coord, state, is_white, result)
+    if pending_drift and symbol == "♖":
+        _add_drift_destinations(from_coord, state, is_white, result)
     if pending_withdrawal and symbol == "♖":
         _add_withdrawal_destinations(from_coord, state, is_white, result)
     if pending_gallop and symbol == "♘":
@@ -1695,6 +1710,41 @@ func _add_battering_ram_destination(from_coord: String, state: Dictionary, is_wh
             paths.append(extra)
     result["destinations"] = destinations
     result["paths"] = paths
+
+# Drift: for each destination the Rook's normal move already has (a slide
+# along its rank/file, capturing or not), also offers the 4 diagonally
+# adjacent squares as additional destinations — the Rook's own straight-line
+# move plus one extra diagonal step at the very end. An empty diagonal
+# square is a valid landing spot; an enemy piece there may be captured
+# (never the king — see _is_king); a friendly piece blocks that one step.
+# Only reachable from _collect_legal_moves_for_piece (the human preview/
+# selection entry point), never from the AI/attack-detection paths, so this
+# can't affect the AI's search or leak the bonus onto the opponent's rooks.
+func _add_drift_destinations(from_coord: String, state: Dictionary, is_white: bool, result: Dictionary) -> void:
+    var destinations: Array[String] = result.get("destinations", [])
+    var diagonal_offsets: Array[Vector2i] = [Vector2i(1, 1), Vector2i(1, -1), Vector2i(-1, 1), Vector2i(-1, -1)]
+    var extra_destinations: Array[String] = []
+
+    for base_coord in destinations.duplicate():
+        var file_index: int = _file_to_index(base_coord.substr(0, 1))
+        var rank_index: int = int(base_coord.substr(1)) - 1
+        for offset in diagonal_offsets:
+            var x: int = file_index + offset.x
+            var y: int = rank_index + offset.y
+            if x < 0 or x >= 8 or y < 0 or y >= 8:
+                continue
+            var coord: String = _index_to_coord(x, y)
+            if coord in destinations or coord in extra_destinations:
+                continue
+            if state.has(coord) and (_is_white_piece(state[coord]) == is_white or _is_king(state[coord])):
+                continue
+            if _move_leaves_king_in_check(from_coord, coord, is_white, state):
+                continue
+            extra_destinations.append(coord)
+
+    for extra in extra_destinations:
+        destinations.append(extra)
+    result["destinations"] = destinations
 
 # The unit step from from_coord to to_coord if they share a rank or file
 # (i.e. a Rook could travel directly between them), otherwise Vector2i.ZERO.

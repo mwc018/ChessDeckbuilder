@@ -27,6 +27,8 @@ const CARD_SCENES: Dictionary = {
     "Absolution": preload("res://scenes/cards/Absolution.tscn"),
     "Return to Court": preload("res://scenes/cards/ReturnToCourt.tscn"),
     "Royal Recall": preload("res://scenes/cards/RoyalRecall.tscn"),
+    "Clean Slate": preload("res://scenes/cards/CleanSlate.tscn"),
+    "Drift": preload("res://scenes/cards/Drift.tscn"),
 }
 
 # The singleton starting deck — one copy of each card a run begins with.
@@ -37,7 +39,7 @@ const CARD_SCENES: Dictionary = {
 # in CARD_SCENES above and fully working, just not part of the starting
 # deck.
 const STARTING_DECK_CARD_NAMES: Array[String] = [
-    "Overextend", "Battering Ram", "Stride", "Gallop", "Trample", "Sidestep", "Free Rein", "Open Gate", "Divine Exception", "Leap of Faith",
+    "Overextend", "Battering Ram", "Stride", "Gallop", "Trample", "Sidestep", "Free Rein", "Open Gate", "Divine Exception", "Leap of Faith", "Clean Slate", "Drift",
 ]
 
 # The pool the victory screen's 3-card draft draws from — exactly the cards

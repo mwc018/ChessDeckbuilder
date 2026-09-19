@@ -48,11 +48,29 @@ func _on_board_status_changed(text: String) -> void:
         status_label.text = text
     _update_end_turn_button()
 
-# Each card's actual rule effect is applied by Board itself (the one place
-# that owns board/turn state) — this is just left as a hook for any future
-# non-gameplay reaction to a card being played.
+# Most cards' actual rule effect is applied by Board itself (the one place
+# that owns board/turn state) — Clean Slate is the one exception, since its
+# effect (discard the rest of hand, draw that many back) is purely about
+# the hand, which only Match owns; Board has no idea individual Card nodes
+# exist. card_played fires from Board._drop_data before confirm_played()
+# frees the played card, so it's still in hand_container here — excluded by
+# identity rather than freed along with the rest.
 func _on_card_played(card: Control) -> void:
     print("Card played: ", card.card_name)
+    if card.card_name == "Clean Slate":
+        _resolve_clean_slate(card)
+
+func _resolve_clean_slate(played_card: Control) -> void:
+    if board == null or hand_container == null:
+        return
+    var remaining: Array = []
+    for card in hand_container.get_children():
+        if card != played_card:
+            remaining.append(card)
+    for card in remaining:
+        board.discard_card_name(card.card_name)
+        card.queue_free()
+    _draw_cards(remaining.size())
 
 func _on_energy_changed(energy: int, max_energy: int) -> void:
     if energy_display != null:
@@ -63,9 +81,12 @@ func _on_energy_changed(energy: int, max_energy: int) -> void:
 # move) — draw a fresh 5-card hand to match the energy/action refill Board
 # just did on its own side.
 func _on_turn_started() -> void:
+    _draw_cards(5)
+
+func _draw_cards(count: int) -> void:
     if board == null or hand_container == null:
         return
-    for card_name in board.draw_card_names(5):
+    for card_name in board.draw_card_names(count):
         var scene: PackedScene = CardCatalog.CARD_SCENES.get(card_name)
         if scene == null:
             continue

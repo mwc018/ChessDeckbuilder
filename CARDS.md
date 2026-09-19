@@ -1,10 +1,13 @@
 # Cards
 
 Reference for every card that currently exists. Card scenes live in
-`scenes/cards/`; the name-to-scene registry and starting deck list live in
-`scripts/Match.gd` (`CARD_SCENES` / `STARTING_DECK_CARD_NAMES`); the actual
-rule effects live in `scripts/Board.gd` (`_apply_card_effect` and the
-`pending_*` fields).
+`scenes/cards/`; the name-to-scene registry and starting deck/reward pool
+lists live in the `CardCatalog` autoload (`scripts/CardCatalog.gd`); the
+run's actual accumulated deck lives in the `RunState` autoload
+(`scripts/RunState.gd`). Most cards' rule effects live in
+`scripts/Board.gd` (`_apply_card_effect` and the `pending_*` fields) —
+Clean Slate is the one exception, handled in `scripts/Match.gd` instead,
+since its effect is about the hand rather than a chess move.
 
 Energy refills to 3 and a fresh 5-card hand is drawn at the start of each of
 the player's turns. The player gets one normal chess move ("action") per
@@ -13,7 +16,7 @@ spending it.
 
 ## Starting deck
 
-One copy of each of the following (10 cards total):
+One copy of each of the following (12 cards total):
 
 - Overextend
 - Battering Ram
@@ -25,6 +28,8 @@ One copy of each of the following (10 cards total):
 - Open Gate
 - Divine Exception
 - Leap of Faith
+- Clean Slate
+- Drift
 
 **Not in the starting deck:** Square Dance, Strafe, Homecoming, Withdrawal,
 Absolution, Return to Court, and Royal Recall — all fully working and
@@ -36,12 +41,12 @@ that "find it later" mechanic now exists.
 
 Winning (checkmate, or the "Win (Debug)" button in the corner of the match
 screen while that's still around for testing) shows a victory screen
-offering up to 3 cards drawn from `Match.REWARD_POOL_CARD_NAMES` — exactly
-the six cards held back from the starting deck above. Cards already
+offering up to 3 cards drawn from `CardCatalog.REWARD_POOL_CARD_NAMES` —
+exactly the six cards held back from the starting deck above. Cards already
 drafted this run are excluded from future offers, so the pool only shrinks;
 once it's empty, winning just starts the next match with no draft screen.
 Clicking a card lets you Confirm (adds it to the run's deck,
-`Match.run_deck_card_names`, and starts a new match) or Cancel (back to all
+`RunState.deck_card_names`, and starts a new match) or Cancel (back to all
 3 choices); Skip starts a new match with the deck unchanged. The drafted
 deck persists for the rest of the run — every match after a draft is dealt
 from the updated list, not the original starting deck.
@@ -67,6 +72,8 @@ from the updated list, not the original starting deck.
 | Absolution | 1 | Action | The next Bishop to move may only return to its starting square, without spending your one action for the turn. | "It came back to where it was forgiven." |
 | Return to Court | 1 | Action | The next Queen to move may only return to its starting square, without spending your one action for the turn. | "Even the boldest queen answers the call home." |
 | Royal Recall | 1 | Action | The next King to move may only return to its starting square, without spending your one action for the turn. | "The crown is safest where it began." |
+| Clean Slate | 1 | Action | Discard the rest of your hand, then draw that many cards. | "Burn the hand. Deal a new one." |
+| Drift | 1 | Modifier | The next Rook to move may end its move with one extra diagonal step. | "Not every line stays straight to the end." |
 
 ## Card effect lifetimes
 
@@ -79,10 +86,14 @@ from the updated list, not the original starting deck.
   action" cards — they're spent by the very next move, not just the next
   move of their matching piece type, so the exemption can't be chained
   across several moves in one turn.)
-- **Battering Ram / Gallop / Leap of Faith** — wait specifically for their
-  matching piece type (Rook, Knight, Bishop respectively) to move, however
-  many other moves happen first within the same turn — but still never
-  survive past End Turn if that piece never moved.
+- **Battering Ram / Drift / Gallop / Leap of Faith** — wait specifically for
+  their matching piece type (Battering Ram and Drift both wait for a Rook,
+  Gallop a Knight, Leap of Faith a Bishop) to move, however many other
+  moves happen first within the same turn — but still never survive past
+  End Turn if that piece never moved.
+- **Clean Slate** — not a "next move" window at all; it resolves the
+  instant it's played (discard the rest of hand, draw that many back),
+  with no pending_* flag and no interaction with piece movement.
 
 ## Same-piece-type collisions
 
