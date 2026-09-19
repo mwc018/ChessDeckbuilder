@@ -1,0 +1,10 @@
+[gd_scene format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/Card.tscn" id="1_card"]
+
+[node name="Sidestep" instance=ExtResource("1_card")]
+card_name = "Sidestep"
+cost = 1
+card_type = 0
+description = "The next pawn to move may instead step one square to the left or right."
+flavor_text = "\"Forward isn't the only way to avoid a fight.\""

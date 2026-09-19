@@ -1,0 +1,10 @@
+[gd_scene format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/Card.tscn" id="1_card"]
+
+[node name="Trample" instance=ExtResource("1_card")]
+card_name = "Trample"
+cost = 1
+card_type = 1
+description = "The next Pawn to move may capture the piece directly ahead of it."
+flavor_text = "\"What stands in the way stands in the way no longer.\""

@@ -3,6 +3,9 @@ extends Control
 signal status_changed(text: String)
 signal card_played(card: Control)
 signal energy_changed(energy: int, max_energy: int)
+# Fired exactly when control returns to the player (after the AI's move) —
+# lets whoever owns the hand (Match) know it's time to draw a fresh 5 cards.
+signal turn_started
 
 const FILES: PackedStringArray = ["a", "b", "c", "d", "e", "f", "g", "h"]
 const STARTING_LAYOUT := {
@@ -110,18 +113,46 @@ var pending_stride: bool = false
 # move turns out to be, swap or not.
 var pending_square_dance: bool = false
 
+# Set by playing the Trample card; lets the human's own next pawn move capture
+# the piece directly ahead of it (normally a pawn can only capture diagonally
+# and is blocked by any piece straight ahead — see _add_trample_destination).
+# Same "next move only" window as Overextend/Stride/Square Dance, not "the
+# next pawn to move" (which could be turns away).
+var pending_trample: bool = false
+
+# Set by playing the Sidestep card; lets the human's own next pawn move step
+# one square sideways onto an empty square instead of moving normally (see
+# _add_sidestep_destinations/_move_piece's sidestep branch) — pawns can never
+# normally move sideways at all. Same "next move only" window as the other
+# next-move cards, and like Square Dance's swap, this is exempt from
+# spending the player's one action for the turn (see _finish_move) — it's
+# an ACTION-type card, not a Modifier.
+var pending_sidestep: bool = false
+
+# Set by playing the Free Rein card; lets the human's own next Knight move
+# happen without spending the player's one action for the turn — unlike
+# Square Dance/Sidestep it doesn't add any new destinations, the Knight
+# still just moves normally (see _move_piece/_restrict_to_action_exempt_
+# destinations), it's exempt from the action economy entirely. Same "next
+# move only" window as the other next-move cards. An ACTION-type card, not
+# a Modifier.
+var pending_free_rein: bool = false
+
 # Set by playing the Battering Ram card; lets the human's own next Rook move
 # that captures a piece continue through it and capture a second piece
 # further along the same line, if one is there to hit. Unlike Overextend this
-# persists across turns until a Rook actually moves (see _move_piece), not
-# just the player's very next move — "the next Rook to move" may not be it.
+# waits for a Rook actually moving (see _move_piece), not just the player's
+# very next move — "the next Rook to move" may not be it — but it still
+# expires at end_turn() same as every other pending_* card effect: it can
+# survive an earlier, unrelated move within the same turn (e.g. a Square
+# Dance swap of some other piece), never into a future turn.
 var pending_battering_ram: bool = false
 
 # Set by playing the Gallop card; lets the human's own next Knight move
 # continue 1 additional square in any direction after a non-capturing leap
-# (see _add_gallop_destinations). Like Battering Ram this persists across
-# turns until a Knight actually moves, not just the player's very next move —
-# "the next Knight to move" may not be it.
+# (see _add_gallop_destinations). Like Battering Ram this waits for a Knight
+# actually moving, not just the player's very next move — "the next Knight
+# to move" may not be it — but likewise never survives past end_turn().
 var pending_gallop: bool = false
 
 # The resource cards cost to play. Refills to MAX_ENERGY at the start of
@@ -129,6 +160,20 @@ var pending_gallop: bool = false
 # opponent's turn unchanged.
 const MAX_ENERGY: int = 3
 var energy: int = MAX_ENERGY
+
+# Logical-only (card names, not scenes/nodes) — Match owns turning these into
+# actual Card instances in the hand. Populated by initialize_deck(), drawn
+# from by draw_card_names(), refilled by discard_card_name().
+var draw_pile: Array[String] = []
+var discard_pile: Array[String] = []
+
+# The player's one normal chess move (relocate/capture/castle — everything
+# _move_piece does except a Square Dance swap, which is an ACTION-type card
+# and explicitly exempt from this). Modifier cards never grant more of these,
+# they just change what this one move can do. Refills to MAX_ACTIONS at the
+# start of each of the player's turns, same cadence as energy.
+const MAX_ACTIONS: int = 1
+var actions_remaining: int = MAX_ACTIONS
 
 # The opponent is always the color the human doesn't play.
 var ai_color: String = "black" if PLAYER_COLOR == "white" else "white"
@@ -171,10 +216,17 @@ func reset_game() -> void:
     pending_overextend = false
     pending_stride = false
     pending_square_dance = false
+    pending_trample = false
+    pending_sidestep = false
+    pending_free_rein = false
     pending_battering_ram = false
     pending_gallop = false
     energy = MAX_ENERGY
     energy_changed.emit(energy, MAX_ENERGY)
+    actions_remaining = MAX_ACTIONS
+    draw_pile.append_array(discard_pile)
+    discard_pile.clear()
+    draw_pile.shuffle()
     _place_pieces()
     _layout_board()
     _update_status()
@@ -347,9 +399,15 @@ func _on_piece_clicked(coord: String) -> void:
 # square, a piece, ...) until a control accepts, so implementing these here
 # on Board is enough to accept a card dropped anywhere on the board. A card
 # that costs more than the player's current energy is rejected here, same
-# as a drop outside the board — it just snaps back to the hand.
+# as a drop outside the board — it just snaps back to the hand. Also
+# rejected outside the player's own turn — with turns no longer flipping
+# instantly on every move, the AI's "thinking" pause is long enough that
+# without this a card could otherwise be played while it's not the player's
+# turn at all.
 func _can_drop_data(_at_position: Vector2, data: Variant) -> bool:
     if typeof(data) != TYPE_DICTIONARY or data.get("type") != "card":
+        return false
+    if game_over or awaiting_promotion or current_turn != PLAYER_COLOR:
         return false
     var card: Control = data.get("card")
     return card != null and is_instance_valid(card) and card.cost <= energy
@@ -359,10 +417,68 @@ func _drop_data(_at_position: Vector2, data: Variant) -> void:
     if card == null or not is_instance_valid(card):
         return
     _apply_card_effect(card.card_name)
+    discard_card_name(card.card_name)
     energy -= card.cost
     energy_changed.emit(energy, MAX_ENERGY)
     card_played.emit(card)
     card.confirm_played()
+
+# --- Deck/hand API (used by Match, which owns the actual Card node
+# instances and the registry mapping a card name to its scene). Board only
+# ever deals in card-name strings — see draw_pile/discard_pile above. ---
+
+# Called once by Match after wiring signals, with the full list of card
+# names that exist (i.e. CARD_SCENES.keys()) — a singleton deck, one copy of
+# each unique card, not multiple copies of the same one.
+func initialize_deck(card_names: Array) -> void:
+    draw_pile.clear()
+    draw_pile.append_array(card_names)
+    draw_pile.shuffle()
+    discard_pile.clear()
+
+# Pops up to count names off the draw pile, reshuffling the discard pile
+# into it first whenever it runs dry. Returns fewer than count only if both
+# piles combined don't have enough cards left.
+func draw_card_names(count: int) -> Array[String]:
+    var drawn: Array[String] = []
+    for i in range(count):
+        if draw_pile.is_empty():
+            if discard_pile.is_empty():
+                break
+            draw_pile.append_array(discard_pile)
+            discard_pile.clear()
+            draw_pile.shuffle()
+        drawn.append(draw_pile.pop_back())
+    return drawn
+
+func discard_card_name(card_name: String) -> void:
+    discard_pile.append(card_name)
+
+# The End Turn button's entry point: discards whatever's left in hand (that
+# part is Match's job, done before calling this), spends the "next move
+# only" card windows that went unused, and hands control to the AI. Every
+# pending_* card effect expires here at the latest — none of them are meant
+# to survive into a future turn, only within the turn they were played
+# (Battering Ram/Gallop can still survive an earlier, unrelated move within
+# this same turn — e.g. a Square Dance swap of some other piece — via the
+# piece-type-gated clears in _finish_move; they just don't carry past
+# end_turn() the way they used to).
+func end_turn() -> void:
+    if game_over or awaiting_promotion or current_turn != PLAYER_COLOR:
+        return
+    pending_overextend = false
+    pending_stride = false
+    pending_square_dance = false
+    pending_trample = false
+    pending_sidestep = false
+    pending_free_rein = false
+    pending_battering_ram = false
+    pending_gallop = false
+    selected_piece_coord = ""
+    _clear_move_highlights()
+    _set_piece_selection_state()
+    current_turn = ai_color
+    _update_status()
 
 # Dispatches by card name to whatever rule change that card makes. Cards
 # with no effect implemented yet still play (leave the hand) — they just
@@ -374,6 +490,12 @@ func _apply_card_effect(card_name: String) -> void:
         pending_stride = true
     elif card_name == "Square Dance" and current_turn == PLAYER_COLOR:
         pending_square_dance = true
+    elif card_name == "Trample" and current_turn == PLAYER_COLOR:
+        pending_trample = true
+    elif card_name == "Sidestep" and current_turn == PLAYER_COLOR:
+        pending_sidestep = true
+    elif card_name == "Free Rein" and current_turn == PLAYER_COLOR:
+        pending_free_rein = true
     elif card_name == "Battering Ram" and current_turn == PLAYER_COLOR:
         pending_battering_ram = true
     elif card_name == "Gallop" and current_turn == PLAYER_COLOR:
@@ -555,7 +677,22 @@ func _move_piece(from_coord: String, to_coord: String, promotion_symbol: String 
         _update_castle_rights_for_move(from_coord, to_coord)
         _swap_piece_nodes(from_coord, to_coord)
         en_passant_target = ""
-        _finish_move(moving_symbol)
+        _finish_move(moving_symbol, true)
+        return
+
+    # Sidestep: the only way a pawn destination can share its origin's rank
+    # is via _add_sidestep_destinations (pawns never normally move sideways
+    # at all). Also handled as its own short-circuit — without this, the
+    # en passant check just below would misfire on it (same file-differs/
+    # target-empty pattern an actual en passant capture has), erasing the
+    # square the pawn just landed on.
+    var is_pawn_mover: bool = moving_symbol == "♙" or moving_symbol == "♟"
+    var is_sidestep_move: bool = is_pawn_mover and to_symbol == "" and to_coord.substr(1) == from_coord.substr(1) and to_coord.substr(0, 1) != from_coord.substr(0, 1)
+    if is_sidestep_move:
+        _update_castle_rights_for_move(from_coord, to_coord)
+        _relocate_piece_node(from_coord, to_coord)
+        en_passant_target = ""
+        _finish_move(moving_symbol, true)
         return
 
     if piece_nodes.has(to_coord):
@@ -565,11 +702,12 @@ func _move_piece(from_coord: String, to_coord: String, promotion_symbol: String 
         piece_nodes.erase(to_coord)
 
     var is_king: bool = moving_symbol == "♔" or moving_symbol == "♚"
-    var is_pawn: bool = moving_symbol == "♙" or moving_symbol == "♟"
     var rook_move: Dictionary = CASTLE_ROOK_MOVES.get(from_coord + to_coord, {}) if is_king else {}
     # A pawn moving diagonally onto an empty square can only be an en passant
     # capture — a normal diagonal pawn move is always onto an occupied square.
-    var is_en_passant_capture: bool = is_pawn and from_coord.substr(0, 1) != to_coord.substr(0, 1) and not board_state.has(to_coord)
+    # (A same-rank, different-file, empty-target pawn move is a Sidestep
+    # instead — already handled and returned above, never reaches here.)
+    var is_en_passant_capture: bool = is_pawn_mover and from_coord.substr(0, 1) != to_coord.substr(0, 1) and not board_state.has(to_coord)
     var en_passant_capture_coord: String = to_coord.substr(0, 1) + from_coord.substr(1) if is_en_passant_capture else ""
     var next_en_passant_target: String = _compute_en_passant_target(from_coord, to_coord, moving_symbol)
     var battering_ram_pierced_coord: String = _resolve_battering_ram_pierce(from_coord, to_coord, moving_symbol)
@@ -597,25 +735,39 @@ func _move_piece(from_coord: String, to_coord: String, promotion_symbol: String 
     if promotion_symbol != "":
         _apply_promotion(to_coord, promotion_symbol)
 
-    _finish_move(moving_symbol)
+    # Free Rein: a normal Knight move needs no special handling of its own
+    # (unlike Square Dance/Sidestep it grants no new destinations, so it
+    # already went through all the capture/etc. logic above like any other
+    # move) — it just needs to skip spending the action once it's done.
+    var is_free_rein_knight_move: bool = pending_free_rein and moving_symbol == "♘"
+    _finish_move(moving_symbol, is_free_rein_knight_move)
 
 # Shared end-of-move bookkeeping: clears the current selection/highlights,
-# consumes whichever "next move" card effects applied to this move, flips
-# the turn, and refills the mover's energy once it becomes the player's turn
-# again. Used by both a normal move and a Square Dance swap, which otherwise
-# share none of the rest of _move_piece's capture/castle/en passant handling.
-func _finish_move(moving_symbol: String) -> void:
+# consumes whichever "next move" card effects applied to this move, and
+# spends the player's one action for the turn (unless this was a Square
+# Dance swap or a Sidestep, which are ACTION-type cards and exempt — see
+# Board.end_turn/actions_remaining). Turns no longer end here: a player move
+# never flips current_turn (only Board.end_turn does, via the End Turn
+# button); the AI's own move still flips control straight back to the
+# player, refilling energy/actions and signaling turn_started so Match knows
+# to draw a fresh hand. Used by every kind of move — normal, Square Dance
+# swap, Sidestep — which otherwise share none of the rest of _move_piece's
+# capture/castle/en passant handling.
+func _finish_move(moving_symbol: String, is_action_exempt: bool = false) -> void:
     selected_piece_coord = ""
     _clear_move_highlights()
     _set_piece_selection_state()
 
-    # The Overextend/Stride/Square Dance windows only ever cover the player's
-    # very next move — win or lose the bonus, it's spent once that move
-    # (this one) happens.
+    # The Overextend/Stride/Square Dance/Trample/Sidestep/Free Rein windows
+    # only ever cover the player's very next move — win or lose the bonus,
+    # it's spent once that move (this one) happens.
     if current_turn == PLAYER_COLOR:
         pending_overextend = false
         pending_stride = false
         pending_square_dance = false
+        pending_trample = false
+        pending_sidestep = false
+        pending_free_rein = false
         # Battering Ram and Gallop each wait for the next move of their own
         # piece type specifically, however many other moves happen first —
         # spent once that piece moves, whether or not the bonus was used.
@@ -623,11 +775,18 @@ func _finish_move(moving_symbol: String) -> void:
             pending_battering_ram = false
         if moving_symbol == "♘":
             pending_gallop = false
-
-    current_turn = "black" if current_turn == "white" else "white"
-    if current_turn == PLAYER_COLOR:
+        if not is_action_exempt:
+            actions_remaining = max(actions_remaining - 1, 0)
+    elif current_turn == ai_color:
+        # The AI just made its one move for the turn — hand control straight
+        # back to the player rather than waiting for an End Turn click of
+        # its own, since the AI has no hand/energy/action economy of its own.
+        current_turn = PLAYER_COLOR
         energy = MAX_ENERGY
         energy_changed.emit(energy, MAX_ENERGY)
+        actions_remaining = MAX_ACTIONS
+        turn_started.emit()
+
     _update_status()
 
 # Moves the pieces at from_coord and to_coord (both board_state + their
@@ -914,11 +1073,48 @@ func _collect_legal_moves_for_piece(symbol: String, from_coord: String, state: D
         _add_stride_destination(from_coord, state, is_white, result)
     if pending_square_dance:
         _add_square_dance_destinations(from_coord, state, is_white, result)
+    if pending_trample and symbol == "♙":
+        _add_trample_destination(from_coord, state, is_white, result)
+    if pending_sidestep and symbol == "♙":
+        _add_sidestep_destinations(from_coord, state, is_white, result)
     if pending_battering_ram and symbol == "♖":
         _add_battering_ram_destination(from_coord, state, is_white, result)
     if pending_gallop and symbol == "♘":
         _add_gallop_destinations(from_coord, state, is_white, result)
+    if actions_remaining <= 0:
+        _restrict_to_action_exempt_destinations(symbol, from_coord, state, is_white, result)
     return result
+
+# Once the player's one action for the turn is spent, only an ACTION-type
+# card's destinations remain available — a Square Dance swap (a same-color-
+# occupied destination), a Sidestep (a same-rank, different-file, empty
+# destination for a pawn — pawns never normally move sideways, so this
+# pattern is unambiguous), or, for a Knight while Free Rein is pending,
+# every destination it has (Free Rein exempts the whole move rather than
+# specific destinations, since it grants no new ones — a Knight just moves
+# normally). The swap/sidestep predicates are exactly what _move_piece
+# itself uses to detect each move type, so this can't drift out of sync with
+# what actually gets treated as exempt there. Every other destination this
+# function generated would consume an action the player no longer has.
+# Paths are cleared too since none of these exempt moves are a slide.
+func _restrict_to_action_exempt_destinations(symbol: String, from_coord: String, state: Dictionary, is_white: bool, result: Dictionary) -> void:
+    if pending_free_rein and symbol == "♘":
+        return
+    var is_pawn: bool = symbol == "♙" or symbol == "♟"
+    var from_rank: String = from_coord.substr(1)
+    var exempt_only: Array[String] = []
+    for destination in result.get("destinations", []):
+        var is_swap: bool = state.has(destination) and _is_white_piece(state[destination]) == is_white
+        var is_sidestep: bool = is_pawn and not state.has(destination) and destination.substr(1) == from_rank
+        if is_swap or is_sidestep:
+            exempt_only.append(destination)
+    result["destinations"] = exempt_only
+    # Must stay a typed Array[String], not a bare [] literal — callers (e.g.
+    # _show_moves_for_piece) assign moves.get("paths", []) straight into an
+    # Array[String] variable, which fails at runtime if what's actually
+    # stored in the dictionary is an untyped Array.
+    var no_paths: Array[String] = []
+    result["paths"] = no_paths
 
 # Gallop: adds the Knight's "long" leaps — 1 square in one direction and 3 in
 # the other, instead of the usual 1-and-2 — as extra destinations. Like any
@@ -1059,6 +1255,51 @@ func _add_stride_destination(from_coord: String, state: Dictionary, is_white: bo
         paths.append(one_step_coord)
     result["destinations"] = destinations
     result["paths"] = paths
+
+# Trample: a pawn normally can't move straight ahead onto an occupied square
+# at all (friend or foe alike blocks it) — this adds the square directly
+# ahead as a capturing destination if an enemy piece sits there, regardless
+# of whether the pawn's ordinary diagonal captures are otherwise available.
+# Only reachable from _collect_legal_moves_for_piece (the human preview/
+# selection entry point), never from the AI/attack-detection paths, so this
+# can't affect the AI's search or leak the bonus onto the opponent's pawns.
+func _add_trample_destination(from_coord: String, state: Dictionary, is_white: bool, result: Dictionary) -> void:
+    var file_char: String = from_coord.substr(0, 1)
+    var rank_number: int = int(from_coord.substr(1))
+    var direction: int = 1 if is_white else -1
+    var ahead_coord: String = _advance_coord(file_char, rank_number, 0, direction)
+    if ahead_coord == "" or not _piece_exists_at(ahead_coord, state):
+        return
+    if _is_white_piece(_piece_symbol_at(ahead_coord, state)) == is_white:
+        return
+    var destinations: Array[String] = result.get("destinations", [])
+    if ahead_coord in destinations:
+        return
+    if _move_leaves_king_in_check(from_coord, ahead_coord, is_white, state):
+        return
+    destinations.append(ahead_coord)
+    result["destinations"] = destinations
+
+# Sidestep: adds the two squares directly beside this pawn (same rank, one
+# file left or right) as destinations, if empty — pawns can never normally
+# move sideways at all, so this is a dedicated lateral step, not a capture
+# (a piece on either side, friend or foe, still blocks that side same as
+# anything blocks a normal forward step). Only reachable from
+# _collect_legal_moves_for_piece (the human preview/selection entry point),
+# never from the AI/attack-detection paths, so this can't affect the AI's
+# search or leak the bonus onto the opponent's pawns.
+func _add_sidestep_destinations(from_coord: String, state: Dictionary, is_white: bool, result: Dictionary) -> void:
+    var file_char: String = from_coord.substr(0, 1)
+    var rank_number: int = int(from_coord.substr(1))
+    var destinations: Array[String] = result.get("destinations", [])
+    for offset in [-1, 1]:
+        var side_coord: String = _advance_coord(file_char, rank_number, offset, 0)
+        if side_coord == "" or _piece_exists_at(side_coord, state) or side_coord in destinations:
+            continue
+        if _move_leaves_king_in_check(from_coord, side_coord, is_white, state):
+            continue
+        destinations.append(side_coord)
+    result["destinations"] = destinations
 
 # Battering Ram: for each capturing destination the Rook already has, look
 # further past it along the same line for a second enemy piece with nothing

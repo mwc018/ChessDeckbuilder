@@ -2,12 +2,7 @@
 
 [ext_resource type="Script" uid="uid://inrk6mwawyik" path="res://scripts/Match.gd" id="1_5x2b8"]
 [ext_resource type="PackedScene" path="res://scenes/Board.tscn" id="1_7x2s4"]
-[ext_resource type="PackedScene" path="res://scenes/cards/Overextend.tscn" id="2_hand"]
 [ext_resource type="PackedScene" path="res://scenes/EnergyDisplay.tscn" id="3_energy"]
-[ext_resource type="PackedScene" path="res://scenes/cards/BatteringRam.tscn" id="4_hand"]
-[ext_resource type="PackedScene" path="res://scenes/cards/Stride.tscn" id="5_hand"]
-[ext_resource type="PackedScene" path="res://scenes/cards/SquareDance.tscn" id="6_hand"]
-[ext_resource type="PackedScene" path="res://scenes/cards/Gallop.tscn" id="7_hand"]
 
 [node name="Match" type="Control" unique_id=426470950]
 layout_mode = 3
@@ -24,6 +19,21 @@ ai_difficulty_max = 0.1
 
 [node name="EnergyDisplay" parent="." unique_id=3357284910 instance=ExtResource("3_energy")]
 layout_mode = 1
+
+[node name="EndTurnButton" type="Button" parent="."]
+layout_mode = 1
+custom_minimum_size = Vector2(140, 56)
+size = Vector2(140, 56)
+theme_override_font_sizes/font_size = 20
+text = "End Turn"
+
+[node name="PileLabel" type="Label" parent="."]
+layout_mode = 1
+custom_minimum_size = Vector2(140, 50)
+size = Vector2(140, 50)
+theme_override_colors/font_color = Color(0.75, 0.75, 0.75, 1)
+theme_override_font_sizes/font_size = 14
+horizontal_alignment = 1
 
 [node name="StatusLabel" type="Label" parent="." unique_id=368646780]
 layout_mode = 1
@@ -60,18 +70,3 @@ offset_bottom = -10.0
 grow_horizontal = 2
 grow_vertical = 0
 alignment = 1
-
-[node name="Overextend" parent="Hand" instance=ExtResource("2_hand")]
-layout_mode = 2
-
-[node name="BatteringRam" parent="Hand" instance=ExtResource("4_hand")]
-layout_mode = 2
-
-[node name="Stride" parent="Hand" instance=ExtResource("5_hand")]
-layout_mode = 2
-
-[node name="SquareDance" parent="Hand" instance=ExtResource("6_hand")]
-layout_mode = 2
-
-[node name="Gallop" parent="Hand" instance=ExtResource("7_hand")]
-layout_mode = 2
