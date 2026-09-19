@@ -1,0 +1,10 @@
+[gd_scene format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/Card.tscn" id="1_card"]
+
+[node name="Sanctuary" instance=ExtResource("1_card")]
+card_name = "Sanctuary"
+cost = 1
+card_type = 0
+description = "The next Bishop to move may instead swap places with your King, without spending your one action for the turn."
+flavor_text = "\"Even a king may take shelter in faith.\""

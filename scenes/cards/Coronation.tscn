@@ -1,0 +1,10 @@
+[gd_scene format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/Card.tscn" id="1_card"]
+
+[node name="Coronation" instance=ExtResource("1_card")]
+card_name = "Coronation"
+cost = 2
+card_type = 0
+description = "The next Queen to move does not spend your one action for the turn."
+flavor_text = "\"The crown does not ask permission to move.\""

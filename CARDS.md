@@ -16,7 +16,7 @@ spending it.
 
 ## Starting deck
 
-One copy of each of the following (12 cards total):
+One copy of each of the following (13 cards total):
 
 - Overextend
 - Battering Ram
@@ -30,19 +30,24 @@ One copy of each of the following (12 cards total):
 - Leap of Faith
 - Clean Slate
 - Drift
+- Conscript
 
 **Not in the starting deck:** Square Dance, Strafe, Homecoming, Withdrawal,
-Absolution, Return to Court, and Royal Recall — all fully working and
-registered, just not dealt at game start. Strafe is just being held back
-for now; the other six are the victory-screen reward pool (see below) —
-that "find it later" mechanic now exists.
+Absolution, Return to Court, Royal Recall, Pilgrimage, Coronation, Royal
+Guard, and Sanctuary — all fully working and registered, just not dealt at
+game start. Strafe is just being held back for now; the other ten are the
+victory-screen reward pool (see below). Going forward, new piece-specific
+bonus cards default to the reward pool rather than the starting deck, to
+keep the starting deck from growing indefinitely as more cards get built
+(see `CARD_IDEAS.md` and the "starting card pool size" discussion) —
+Pilgrimage was the first card built under that approach.
 
 ## Winning a match: the card draft
 
 Winning (checkmate, or the "Win (Debug)" button in the corner of the match
 screen while that's still around for testing) shows a victory screen
 offering up to 3 cards drawn from `CardCatalog.REWARD_POOL_CARD_NAMES` —
-exactly the six cards held back from the starting deck above. Cards already
+the cards held back from the starting deck above. Cards already
 drafted this run are excluded from future offers, so the pool only shrinks;
 once it's empty, winning just starts the next match with no draft screen.
 Clicking a card lets you Confirm (adds it to the run's deck,
@@ -74,23 +79,32 @@ from the updated list, not the original starting deck.
 | Royal Recall | 1 | Action | The next King to move may only return to its starting square, without spending your one action for the turn. | "The crown is safest where it began." |
 | Clean Slate | 1 | Action | Discard the rest of your hand, then draw that many cards. | "Burn the hand. Deal a new one." |
 | Drift | 1 | Modifier | The next Rook to move may end its move with one extra diagonal step. | "Not every line stays straight to the end." |
+| Conscript | 1 | Action | The next pawn to move does not spend your one action for the turn. | "No one asked if he was ready to fight." |
+| Pilgrimage | 1 | Modifier | The next Bishop to move may end its move with one extra orthogonal step. | "Even the faithful sometimes step off the path." |
+| Coronation | 2 | Action | The next Queen to move does not spend your one action for the turn. | "The crown does not ask permission to move." |
+| Royal Guard | 2 | Action | The next King to move does not spend your one action for the turn. | "Even kings need not walk alone." |
+| Sanctuary | 1 | Action | The next Bishop to move may instead swap places with your King, without spending your one action for the turn. | "Even a king may take shelter in faith." |
 
 ## Card effect lifetimes
 
 - **Overextend / Stride / Square Dance / Trample / Sidestep / Strafe / Free
   Rein / Open Gate / Divine Exception / Homecoming / Withdrawal /
-  Absolution / Return to Court / Royal Recall** — a "next move only" window:
-  cleared the instant the player makes their very next move, whether or not
-  that move actually used the bonus, and always cleared by End Turn if
-  unused. (This includes the seven action-exempt "does not spend your
-  action" cards — they're spent by the very next move, not just the next
-  move of their matching piece type, so the exemption can't be chained
-  across several moves in one turn.)
-- **Battering Ram / Drift / Gallop / Leap of Faith** — wait specifically for
-  their matching piece type (Battering Ram and Drift both wait for a Rook,
-  Gallop a Knight, Leap of Faith a Bishop) to move, however many other
-  moves happen first within the same turn — but still never survive past
-  End Turn if that piece never moved.
+  Absolution / Return to Court / Royal Recall / Conscript / Coronation /
+  Royal Guard / Sanctuary** — a "next move only" window: cleared the instant
+  the player makes their very next move, whether or not that move actually
+  used the bonus, and always cleared by End Turn if unused. (This includes
+  the eleven action-exempt "does not spend your action" cards — they're
+  spent by the very next move, not just the next move of their matching
+  piece type, so the exemption can't be chained across several moves in one
+  turn. Sanctuary is only usable by a Bishop, but like every other
+  ACTION-type card its window still isn't held open waiting specifically
+  for one — playing it and then moving some other piece wastes it, same as
+  Square Dance.)
+- **Battering Ram / Drift / Gallop / Leap of Faith / Pilgrimage** — wait
+  specifically for their matching piece type (Battering Ram and Drift both
+  wait for a Rook, Gallop a Knight, Leap of Faith and Pilgrimage both a
+  Bishop) to move, however many other moves happen first within the same
+  turn — but still never survive past End Turn if that piece never moved.
 - **Clean Slate** — not a "next move" window at all; it resolves the
   instant it's played (discard the rest of hand, draw that many back),
   with no pending_* flag and no interaction with piece movement.
@@ -103,4 +117,14 @@ Homecoming/Withdrawal/Absolution/Return to Court/Royal Recall each fully
 nowhere else," overriding whatever Battering Ram/Gallop/Leap of Faith would
 otherwise have added for that same move. If a player somehow has both a
 piece-type modifier and its matching "return home" card pending on the same
-turn, the return-home card wins.
+turn, the return-home card wins. Sanctuary is the same kind of "replace"
+card for the Bishop specifically; if both Absolution and Sanctuary are
+pending on the same Bishop move, Sanctuary wins (its hook runs after
+Absolution's in `_collect_legal_moves_for_piece`).
+
+Sanctuary itself needed no new move-execution code at all — it reuses
+Square Dance's swap machinery outright. `_move_piece`'s swap branch
+triggers on *any* friendly-occupied destination regardless of which card
+added it, and the action-exemption filter's swap check works the same way,
+so a Bishop swapping with its King (however far away) is already handled
+by logic that already existed for Square Dance.

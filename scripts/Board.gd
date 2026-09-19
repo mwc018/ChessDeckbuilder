@@ -205,6 +205,41 @@ var pending_open_gate: bool = false
 # next-move cards. An ACTION-type card, not a Modifier.
 var pending_divine_exception: bool = false
 
+# Set by playing the Conscript card; lets the human's own next pawn move
+# happen without spending the player's one action for the turn — same idea
+# as Free Rein/Open Gate/Divine Exception but for a pawn (see _move_piece/
+# _restrict_to_action_exempt_destinations). Same "next move only" window as
+# the other next-move cards. An ACTION-type card, not a Modifier.
+var pending_conscript: bool = false
+
+# Set by playing the Coronation card; lets the human's own next Queen move
+# happen without spending the player's one action for the turn — same idea
+# as Free Rein/Open Gate/Divine Exception/Conscript but for a Queen (see
+# _move_piece/_restrict_to_action_exempt_destinations). Same "next move
+# only" window as the other next-move cards. An ACTION-type card, not a
+# Modifier.
+var pending_coronation: bool = false
+
+# Set by playing the Royal Guard card; lets the human's own next King move
+# happen without spending the player's one action for the turn — same idea
+# as Free Rein/Open Gate/Divine Exception/Conscript but for a King (see
+# _move_piece/_restrict_to_action_exempt_destinations). Same "next move
+# only" window as the other next-move cards. An ACTION-type card, not a
+# Modifier.
+var pending_royal_guard: bool = false
+
+# Set by playing the Sanctuary card; lets the human's own next Bishop move
+# swap places with its own King instead of moving normally, no matter how
+# far apart they are (see _add_sanctuary_destinations). This reuses the same
+# swap machinery Square Dance already relies on — _move_piece's swap branch
+# triggers on any friendly-occupied destination regardless of which card
+# added it — so the swap itself is exempt from the player's one action the
+# same way a Square Dance swap already is. Same "next move only" window as
+# every other ACTION-type card, even the piece-specific ones (Free Rein/
+# Open Gate/etc.) — it's spent by whatever the player's very next move
+# turns out to be, not held open waiting specifically for a Bishop.
+var pending_sanctuary: bool = false
+
 # Set by playing the Battering Ram card; lets the human's own next Rook move
 # that captures a piece continue through it and capture a second piece
 # further along the same line, if one is there to hit. Unlike Overextend this
@@ -237,6 +272,16 @@ var pending_gallop: bool = false
 # Battering Ram/Gallop this waits for a Bishop actually moving, not just the
 # player's very next move, but likewise never survives past end_turn().
 var pending_leap_of_faith: bool = false
+
+# Set by playing the Pilgrimage card; lets the human's own next Bishop move
+# end with one extra orthogonal step (forward, back, or sideways) beyond
+# wherever its normal diagonal slide would have stopped (see
+# _add_pilgrimage_destinations) — the orthogonal mirror of Drift. Same
+# piece-type-specific window as Battering Ram/Drift/Gallop/Leap of Faith —
+# waits for a Bishop actually moving, not just the very next move — and
+# likewise never survives past end_turn(). A Modifier card, not an ACTION —
+# it spends the player's one action like any other Bishop move.
+var pending_pilgrimage: bool = false
 
 # The resource cards cost to play. Refills to MAX_ENERGY at the start of
 # each of the player's turns; spent energy otherwise carries through the
@@ -310,10 +355,15 @@ func reset_game() -> void:
     pending_royal_recall = false
     pending_open_gate = false
     pending_divine_exception = false
+    pending_conscript = false
+    pending_coronation = false
+    pending_royal_guard = false
+    pending_sanctuary = false
     pending_battering_ram = false
     pending_drift = false
     pending_gallop = false
     pending_leap_of_faith = false
+    pending_pilgrimage = false
     energy = MAX_ENERGY
     energy_changed.emit(energy, MAX_ENERGY)
     actions_remaining = MAX_ACTIONS
@@ -573,10 +623,15 @@ func end_turn() -> void:
     pending_royal_recall = false
     pending_open_gate = false
     pending_divine_exception = false
+    pending_conscript = false
+    pending_coronation = false
+    pending_royal_guard = false
+    pending_sanctuary = false
     pending_battering_ram = false
     pending_drift = false
     pending_gallop = false
     pending_leap_of_faith = false
+    pending_pilgrimage = false
     selected_piece_coord = ""
     _clear_move_highlights()
     _set_piece_selection_state()
@@ -626,6 +681,14 @@ func _apply_card_effect(card_name: String) -> void:
         pending_open_gate = true
     elif card_name == "Divine Exception" and current_turn == PLAYER_COLOR:
         pending_divine_exception = true
+    elif card_name == "Conscript" and current_turn == PLAYER_COLOR:
+        pending_conscript = true
+    elif card_name == "Coronation" and current_turn == PLAYER_COLOR:
+        pending_coronation = true
+    elif card_name == "Royal Guard" and current_turn == PLAYER_COLOR:
+        pending_royal_guard = true
+    elif card_name == "Sanctuary" and current_turn == PLAYER_COLOR:
+        pending_sanctuary = true
     elif card_name == "Battering Ram" and current_turn == PLAYER_COLOR:
         pending_battering_ram = true
     elif card_name == "Drift" and current_turn == PLAYER_COLOR:
@@ -634,6 +697,8 @@ func _apply_card_effect(card_name: String) -> void:
         pending_gallop = true
     elif card_name == "Leap of Faith" and current_turn == PLAYER_COLOR:
         pending_leap_of_faith = true
+    elif card_name == "Pilgrimage" and current_turn == PLAYER_COLOR:
+        pending_pilgrimage = true
 
 func _on_square_input(event: InputEvent, coord: String) -> void:
     if game_over or awaiting_promotion:
@@ -905,11 +970,16 @@ func _move_piece(from_coord: String, to_coord: String, promotion_symbol: String 
     var is_royal_recall_king_move: bool = pending_royal_recall and moving_symbol == "♔"
     var is_open_gate_rook_move: bool = pending_open_gate and moving_symbol == "♖"
     var is_divine_exception_bishop_move: bool = pending_divine_exception and moving_symbol == "♗"
+    var is_conscript_pawn_move: bool = pending_conscript and moving_symbol == "♙"
+    var is_coronation_queen_move: bool = pending_coronation and moving_symbol == "♕"
+    var is_royal_guard_king_move: bool = pending_royal_guard and moving_symbol == "♔"
     var is_action_exempt_move: bool = (
         is_free_rein_knight_move or is_homecoming_knight_move or
         is_withdrawal_rook_move or is_absolution_bishop_move or
         is_return_to_court_queen_move or is_royal_recall_king_move or
-        is_open_gate_rook_move or is_divine_exception_bishop_move
+        is_open_gate_rook_move or is_divine_exception_bishop_move or
+        is_conscript_pawn_move or is_coronation_queen_move or
+        is_royal_guard_king_move
     )
     _finish_move(moving_symbol, is_action_exempt_move)
 
@@ -931,9 +1001,9 @@ func _finish_move(moving_symbol: String, is_action_exempt: bool = false) -> void
 
     # The Overextend/Stride/Square Dance/Trample/Sidestep/Strafe/Free Rein/
     # Homecoming/Withdrawal/Absolution/Return to Court/Royal Recall/Open
-    # Gate/Divine Exception windows only ever cover the player's very next
-    # move — win or lose the bonus, it's spent once that move (this one)
-    # happens.
+    # Gate/Divine Exception/Conscript/Coronation/Royal Guard/Sanctuary
+    # windows only ever cover the player's very next move — win or lose the
+    # bonus, it's spent once that move (this one) happens.
     if current_turn == PLAYER_COLOR:
         pending_overextend = false
         pending_stride = false
@@ -949,10 +1019,14 @@ func _finish_move(moving_symbol: String, is_action_exempt: bool = false) -> void
         pending_royal_recall = false
         pending_open_gate = false
         pending_divine_exception = false
-        # Battering Ram, Drift, Gallop, and Leap of Faith each wait for the
-        # next move of their own piece type specifically, however many
-        # other moves happen first — spent once that piece moves, whether
-        # or not the bonus was used.
+        pending_conscript = false
+        pending_coronation = false
+        pending_royal_guard = false
+        pending_sanctuary = false
+        # Battering Ram, Drift, Gallop, Leap of Faith, and Pilgrimage each
+        # wait for the next move of their own piece type specifically,
+        # however many other moves happen first — spent once that piece
+        # moves, whether or not the bonus was used.
         if moving_symbol == "♖":
             pending_battering_ram = false
             pending_drift = false
@@ -960,6 +1034,7 @@ func _finish_move(moving_symbol: String, is_action_exempt: bool = false) -> void
             pending_gallop = false
         if moving_symbol == "♗":
             pending_leap_of_faith = false
+            pending_pilgrimage = false
         if not is_action_exempt:
             actions_remaining = max(actions_remaining - 1, 0)
     elif current_turn == ai_color:
@@ -1277,8 +1352,12 @@ func _collect_legal_moves_for_piece(symbol: String, from_coord: String, state: D
         _add_homecoming_destinations(from_coord, state, is_white, result)
     if pending_leap_of_faith and symbol == "♗":
         _add_leap_of_faith_destinations(from_coord, state, is_white, result)
+    if pending_pilgrimage and symbol == "♗":
+        _add_pilgrimage_destinations(from_coord, state, is_white, result)
     if pending_absolution and symbol == "♗":
         _add_absolution_destinations(from_coord, state, is_white, result)
+    if pending_sanctuary and symbol == "♗":
+        _add_sanctuary_destinations(from_coord, state, is_white, result)
     if pending_return_to_court and symbol == "♕":
         _add_return_to_court_destinations(from_coord, state, is_white, result)
     if pending_royal_recall and symbol == "♔":
@@ -1294,9 +1373,11 @@ func _collect_legal_moves_for_piece(symbol: String, from_coord: String, state: D
 # pattern is unambiguous), or, for a Knight while Free Rein is pending,
 # every destination it has (Free Rein exempts the whole move rather than
 # specific destinations, since it grants no new ones — a Knight just moves
-# normally, and likewise for a Rook while Open Gate is pending, or a Bishop
-# while Divine Exception is pending). Homecoming/Withdrawal/Absolution/
-# Return to Court/Royal Recall need the same "keep everything" treatment for
+# normally, and likewise for a Rook while Open Gate is pending, a Bishop
+# while Divine Exception is pending, a pawn while Conscript is pending, a
+# Queen while Coronation is pending, or a King while Royal Guard is
+# pending). Homecoming/Withdrawal/Absolution/Return to Court/Royal Recall
+# need the same "keep everything" treatment for
 # a different reason: by the time this runs, that piece's destinations have
 # already been replaced entirely with its (empty) starting square(s) — see
 # _replace_with_home_square_destinations — so every destination left really
@@ -1322,6 +1403,12 @@ func _restrict_to_action_exempt_destinations(symbol: String, from_coord: String,
     if pending_open_gate and symbol == "♖":
         return
     if pending_divine_exception and symbol == "♗":
+        return
+    if pending_conscript and symbol == "♙":
+        return
+    if pending_coronation and symbol == "♕":
+        return
+    if pending_royal_guard and symbol == "♔":
         return
     var is_pawn: bool = symbol == "♙" or symbol == "♟"
     var from_rank: String = from_coord.substr(1)
@@ -1417,6 +1504,29 @@ func _add_absolution_destinations(from_coord: String, state: Dictionary, is_whit
 
 func _add_return_to_court_destinations(from_coord: String, state: Dictionary, is_white: bool, result: Dictionary) -> void:
     _replace_with_home_square_destinations(from_coord, state, is_white, result, ["d1"], ["d8"])
+
+# Sanctuary: REPLACES this Bishop's destinations entirely with its own
+# King's square (from anywhere on the board, not just adjacent), if
+# swapping there wouldn't leave that King in check — "instead of moving
+# normally," same framing as Homecoming/Withdrawal/Absolution/Return to
+# Court/Royal Recall. Reuses Square Dance's own swap machinery for free:
+# _move_piece's swap branch already triggers on any friendly-occupied
+# destination regardless of which card added it, and
+# _restrict_to_action_exempt_destinations' generic swap check already keeps
+# any friendly-occupied destination once the action is spent — so this
+# needs no new move-execution logic, just a king-only, unlimited-range
+# destination. Only reachable from _collect_legal_moves_for_piece (the
+# human preview/selection entry point), never from the AI/attack-detection
+# paths, so this can't affect the AI's search or leak the bonus onto the
+# opponent's bishops.
+func _add_sanctuary_destinations(from_coord: String, state: Dictionary, is_white: bool, result: Dictionary) -> void:
+    var destinations: Array[String] = []
+    var king_coord: String = _find_king_coord(is_white, state)
+    if king_coord != "" and king_coord != from_coord and not _swap_leaves_king_in_check(from_coord, king_coord, is_white, state):
+        destinations.append(king_coord)
+    result["destinations"] = destinations
+    var no_paths: Array[String] = []
+    result["paths"] = no_paths
 
 func _add_royal_recall_destinations(from_coord: String, state: Dictionary, is_white: bool, result: Dictionary) -> void:
     _replace_with_home_square_destinations(from_coord, state, is_white, result, ["e1"], ["e8"])
@@ -1711,24 +1821,23 @@ func _add_battering_ram_destination(from_coord: String, state: Dictionary, is_wh
     result["destinations"] = destinations
     result["paths"] = paths
 
-# Drift: for each destination the Rook's normal move already has (a slide
-# along its rank/file, capturing or not), also offers the 4 diagonally
-# adjacent squares as additional destinations — the Rook's own straight-line
-# move plus one extra diagonal step at the very end. An empty diagonal
-# square is a valid landing spot; an enemy piece there may be captured
-# (never the king — see _is_king); a friendly piece blocks that one step.
-# Only reachable from _collect_legal_moves_for_piece (the human preview/
-# selection entry point), never from the AI/attack-detection paths, so this
-# can't affect the AI's search or leak the bonus onto the opponent's rooks.
-func _add_drift_destinations(from_coord: String, state: Dictionary, is_white: bool, result: Dictionary) -> void:
+# Shared by Drift/Pilgrimage: for each destination a piece's normal move
+# already has, also offers each of the given step_offsets from that square
+# as an additional destination — the piece's own move plus one extra fixed
+# step at the very end. An empty square there is a valid landing spot; an
+# enemy piece may be captured (never the king — see _is_king); a friendly
+# piece blocks that one step. Only reachable from
+# _collect_legal_moves_for_piece (the human preview/selection entry point),
+# never from the AI/attack-detection paths, so this can't affect the AI's
+# search or leak the bonus onto the opponent's pieces.
+func _add_extended_step_destinations(from_coord: String, state: Dictionary, is_white: bool, result: Dictionary, step_offsets: Array[Vector2i]) -> void:
     var destinations: Array[String] = result.get("destinations", [])
-    var diagonal_offsets: Array[Vector2i] = [Vector2i(1, 1), Vector2i(1, -1), Vector2i(-1, 1), Vector2i(-1, -1)]
     var extra_destinations: Array[String] = []
 
     for base_coord in destinations.duplicate():
         var file_index: int = _file_to_index(base_coord.substr(0, 1))
         var rank_index: int = int(base_coord.substr(1)) - 1
-        for offset in diagonal_offsets:
+        for offset in step_offsets:
             var x: int = file_index + offset.x
             var y: int = rank_index + offset.y
             if x < 0 or x >= 8 or y < 0 or y >= 8:
@@ -1745,6 +1854,17 @@ func _add_drift_destinations(from_coord: String, state: Dictionary, is_white: bo
     for extra in extra_destinations:
         destinations.append(extra)
     result["destinations"] = destinations
+
+# Drift: the Rook's own straight-line move plus one extra diagonal step.
+func _add_drift_destinations(from_coord: String, state: Dictionary, is_white: bool, result: Dictionary) -> void:
+    var diagonal_offsets: Array[Vector2i] = [Vector2i(1, 1), Vector2i(1, -1), Vector2i(-1, 1), Vector2i(-1, -1)]
+    _add_extended_step_destinations(from_coord, state, is_white, result, diagonal_offsets)
+
+# Pilgrimage: the Bishop's own diagonal move plus one extra orthogonal step
+# — the orthogonal mirror of Drift.
+func _add_pilgrimage_destinations(from_coord: String, state: Dictionary, is_white: bool, result: Dictionary) -> void:
+    var orthogonal_offsets: Array[Vector2i] = [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
+    _add_extended_step_destinations(from_coord, state, is_white, result, orthogonal_offsets)
 
 # The unit step from from_coord to to_coord if they share a rank or file
 # (i.e. a Rook could travel directly between them), otherwise Vector2i.ZERO.

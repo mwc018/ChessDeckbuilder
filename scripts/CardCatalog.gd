@@ -29,6 +29,11 @@ const CARD_SCENES: Dictionary = {
     "Royal Recall": preload("res://scenes/cards/RoyalRecall.tscn"),
     "Clean Slate": preload("res://scenes/cards/CleanSlate.tscn"),
     "Drift": preload("res://scenes/cards/Drift.tscn"),
+    "Conscript": preload("res://scenes/cards/Conscript.tscn"),
+    "Pilgrimage": preload("res://scenes/cards/Pilgrimage.tscn"),
+    "Coronation": preload("res://scenes/cards/Coronation.tscn"),
+    "Royal Guard": preload("res://scenes/cards/RoyalGuard.tscn"),
+    "Sanctuary": preload("res://scenes/cards/Sanctuary.tscn"),
 }
 
 # The singleton starting deck — one copy of each card a run begins with.
@@ -39,14 +44,18 @@ const CARD_SCENES: Dictionary = {
 # in CARD_SCENES above and fully working, just not part of the starting
 # deck.
 const STARTING_DECK_CARD_NAMES: Array[String] = [
-    "Overextend", "Battering Ram", "Stride", "Gallop", "Trample", "Sidestep", "Free Rein", "Open Gate", "Divine Exception", "Leap of Faith", "Clean Slate", "Drift",
+    "Overextend", "Battering Ram", "Stride", "Gallop", "Trample", "Sidestep", "Free Rein", "Open Gate", "Divine Exception", "Leap of Faith", "Clean Slate", "Drift", "Conscript",
 ]
 
-# The pool the victory screen's 3-card draft draws from — exactly the cards
-# left out of the starting deck above (except Strafe, which isn't part of
-# the "find it later" story, it's just being held back from the opening
-# hand entirely for now). Winning is how a run actually acquires these.
+# The pool the victory screen's 3-card draft draws from — the cards left
+# out of the starting deck above (except Strafe, which isn't part of the
+# "find it later" story, it's just being held back from the opening hand
+# entirely for now). Winning is how a run actually acquires these. Every new
+# piece-specific card since Pilgrimage defaults to here rather than the
+# starting deck, to keep the starting deck lean instead of growing it with
+# every new card built — see the "starting card pool size" discussion.
 const REWARD_POOL_CARD_NAMES: Array[String] = [
     "Square Dance", "Homecoming", "Withdrawal", "Absolution",
-    "Return to Court", "Royal Recall",
+    "Return to Court", "Royal Recall", "Pilgrimage", "Coronation",
+    "Royal Guard", "Sanctuary",
 ]
