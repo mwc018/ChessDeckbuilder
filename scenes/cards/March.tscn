@@ -1,0 +1,10 @@
+[gd_scene format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/Card.tscn" id="1_card"]
+
+[node name="March" instance=ExtResource("1_card")]
+card_name = "March"
+cost = 2
+card_type = 2
+description = "Pawns can always move 2 squares forward. This effect lasts for the rest of the round."
+flavor_text = "\"No ground is too far to cover.\""

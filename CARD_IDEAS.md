@@ -41,6 +41,15 @@ piece:
 - **Reinforced Line** — *Modifier, 1 cost, Medium.* The next pawn to move
   may instead stay in place and grant an adjacent friendly pawn immunity
   from capture until your next turn.
+- **Skirmish** — *Modifier, 1 cost, Easy.* The next pawn to move may
+  capture a piece directly to its left or right on the same rank instead
+  of moving forward — pairs with Trample (forward capture) and Strafe
+  (diagonal non-capture) to round out the pawn's off-book capture options.
+- **Standing Order** — *Modifier, 2 cost, Hard.* The next pawn to move may
+  instead hold its square and become immune to capture until your next
+  turn — the pawn's own take on the "immunity" idea that shows up for the
+  Rook (Fortify, below) and generically (Reinforced Line, above), scoped
+  down to a single pawn defending itself rather than an ally.
 
 ## Knight
 
@@ -59,6 +68,14 @@ piece:
   be (i.e. a controlled exception to normal check-safety filtering) — more
   of a "feels powerful" idea than a concretely scoped one; would need real
   design work to define exactly what it overrides.
+- **Hunt** — *Modifier, 2 cost, Medium.* If the next Knight's move captures
+  a piece, it may immediately follow with a second Knight leap from its
+  landing square — the capture-triggered mirror of Double Dutch (which
+  triggers on a non-capturing move instead).
+- **Retreat** — *Action, 1 cost, Easy.* The next Knight to move may instead
+  return to the square it started this turn on, without spending your
+  action — a cheap positional safety valve, distinct from Homecoming's
+  fixed starting-square target.
 
 ## Bishop
 
@@ -78,6 +95,16 @@ Absolution, Sanctuary (Action x3).
   letting it "see" one square off its normal color before continuing, by
   taking a single orthogonal step at the *start* of its move instead of the
   end (contrast with Pilgrimage, which adds the step at the end).
+- **Confessional** — *Action, 2 cost, Medium.* The next Bishop to move may
+  pass through a square occupied by a friendly piece (not just capture
+  through an enemy one, like Leap of Faith) without disturbing it, so long
+  as it still ends its move on an empty or enemy-occupied square.
+- **Penance** — *Modifier, 1 cost, Hard.* The next Bishop's move may end on
+  a square currently attacked by exactly one enemy piece without that
+  counting as moving into danger, provided the Bishop would still be
+  defended by another friendly piece after landing — a scoped-down cousin
+  of the King's Decree of Safety idea below, easier to justify since
+  losing a Bishop isn't game-ending the way losing a King is.
 
 ## Rook
 
@@ -92,6 +119,15 @@ Absolution, Sanctuary (Action x3).
   swap places with a friendly piece anywhere along its current rank or
   file, without spending your action — a long-range Square Dance
   restricted to Rooks.
+- **Siege Line** — *Modifier, 2 cost, Medium.* The next Rook's move may end
+  with one extra step in the same direction it just moved, even past where
+  it would normally stop — a straight-line cousin of Drift's diagonal
+  kink, letting the Rook punch one square further than the board's
+  contents would otherwise allow.
+- **Standing Guard** — *Action, 1 cost, Easy.* The next Rook to move may
+  instead hold its square and grant an adjacent friendly piece a free
+  no-action-cost move next turn — a Rook camping in place to set up a
+  follow-up play, distinct from Fortify's immunity framing above.
 
 ## Queen
 
@@ -116,6 +152,15 @@ Absolution, Sanctuary (Action x3).
   may jump over the first piece blocking her path once and keep going, in
   any of her 8 directions — Leap of Faith's trick generalized from Bishop
   to Queen.
+- **Council** — *Action, 2 cost, Easy.* The next Queen to move may swap
+  places with any friendly Rook or Bishop on the board, without spending
+  your action — a scoped-down Abdication that only reaches the pieces she
+  "commands," rather than any piece on the board.
+- **Overwhelm** — *Modifier, 2 cost, Hard.* If the next Queen's move
+  captures a piece, she may immediately make one additional single-square
+  move in any direction as a bonus, as long as that bonus move doesn't
+  itself capture — combines Regicide's follow-through with Royal Decree's
+  extra step into one bigger, riskier payoff card.
 
 ## King
 
@@ -145,3 +190,12 @@ uniquely precious and already tightly constrained by check rules.
   or otherwise can't actually capture the King next turn — the most
   rules-bending idea on this list; would need a real definition of
   "counts as safe" before it could be scoped, let alone built.
+- **Bodyguard** — *Action, 1 cost, Easy.* The next friendly piece adjacent
+  to your King that moves does not spend your one action for the turn —
+  extends the no-action-cost template to "whoever's guarding the King"
+  instead of the King himself.
+- **Steady Hand** — *Modifier, 1 cost, Medium.* If your King has not moved
+  yet this game, its next move may go 2 squares in any direction (not just
+  toward a rook, like castling) as long as every square it passes through
+  is empty and unattacked — a more flexible one-time variant of Second
+  Wind above, gated on "hasn't moved" instead of "not currently in check."

@@ -283,6 +283,16 @@ var pending_leap_of_faith: bool = false
 # it spends the player's one action like any other Bishop move.
 var pending_pilgrimage: bool = false
 
+# Set by playing March, a Power card. Unlike every pending_* flag above,
+# this is never cleared by end_turn()/_finish_move() — Powers are unique and
+# permanent for the rest of the round once played (see _drop_data, which
+# skips discarding a Power card so it can't be reshuffled back into the
+# draw pile either). Lets the human's own pawns advance 2 squares forward
+# on any move, not just from their original square (see
+# _add_march_destination). Only reset in reset_game(), i.e. at the start of
+# a new round.
+var march_active: bool = false
+
 # The resource cards cost to play. Refills to MAX_ENERGY at the start of
 # each of the player's turns; spent energy otherwise carries through the
 # opponent's turn unchanged.
@@ -364,6 +374,7 @@ func reset_game() -> void:
     pending_gallop = false
     pending_leap_of_faith = false
     pending_pilgrimage = false
+    march_active = false
     energy = MAX_ENERGY
     energy_changed.emit(energy, MAX_ENERGY)
     actions_remaining = MAX_ACTIONS
@@ -560,7 +571,12 @@ func _drop_data(_at_position: Vector2, data: Variant) -> void:
     if card == null or not is_instance_valid(card):
         return
     _apply_card_effect(card.card_name)
-    discard_card_name(card.card_name)
+    # Power cards are unique: once played they're gone for the rest of the
+    # round, not just discarded. Skipping discard_card_name here keeps them
+    # out of both piles entirely, so a discard-pile reshuffle can never deal
+    # one back out again this round.
+    if card.card_type != card.CardType.POWER:
+        discard_card_name(card.card_name)
     energy -= card.cost
     energy_changed.emit(energy, MAX_ENERGY)
     card_played.emit(card)
@@ -699,6 +715,8 @@ func _apply_card_effect(card_name: String) -> void:
         pending_leap_of_faith = true
     elif card_name == "Pilgrimage" and current_turn == PLAYER_COLOR:
         pending_pilgrimage = true
+    elif card_name == "March" and current_turn == PLAYER_COLOR:
+        march_active = true
 
 func _on_square_input(event: InputEvent, coord: String) -> void:
     if game_over or awaiting_promotion:
@@ -1332,6 +1350,8 @@ func _collect_legal_moves_for_piece(symbol: String, from_coord: String, state: D
         _add_overextend_destination(from_coord, state, is_white, result)
     if pending_stride and symbol == "♙":
         _add_stride_destination(from_coord, state, is_white, result)
+    if march_active and symbol == "♙":
+        _add_march_destination(from_coord, state, is_white, result)
     if pending_square_dance:
         _add_square_dance_destinations(from_coord, state, is_white, result)
     if pending_trample and symbol == "♙":
@@ -1687,6 +1707,40 @@ func _add_stride_destination(from_coord: String, state: Dictionary, is_white: bo
     var rank_number: int = int(from_coord.substr(1))
     var one_step_coord: String = _advance_coord(file_char, rank_number, 0, 1)
     var two_step_coord: String = _advance_coord(file_char, rank_number, 0, 2)
+    if one_step_coord == "" or two_step_coord == "":
+        return
+    if _piece_exists_at(one_step_coord, state) or _piece_exists_at(two_step_coord, state):
+        return
+    var destinations: Array[String] = result.get("destinations", [])
+    if two_step_coord in destinations:
+        return
+    if _move_leaves_king_in_check(from_coord, two_step_coord, is_white, state):
+        return
+    destinations.append(two_step_coord)
+    var paths: Array[String] = result.get("paths", [])
+    if not (one_step_coord in paths):
+        paths.append(one_step_coord)
+    result["destinations"] = destinations
+    result["paths"] = paths
+
+# March: whatever rank this pawn is currently on (not just its original
+# rank), if the square directly ahead is empty and safe and the square
+# beyond that is also empty and safe, add the two-square advance as an extra
+# destination/path square. Unlike Stride (a one-time "next move" window)
+# march_active never gets cleared by a move happening — it's a permanent
+# Power effect, so this runs every time a pawn's moves are collected for the
+# rest of the round. A pawn still on its original rank already has this move
+# naturally via the base pawn-move generator, so this simply does nothing
+# new for it. Only reachable from _collect_legal_moves_for_piece (the human
+# preview/selection entry point), never from the AI/attack-detection paths,
+# so this can't affect the AI's search or leak the bonus onto the opponent's
+# pawns.
+func _add_march_destination(from_coord: String, state: Dictionary, is_white: bool, result: Dictionary) -> void:
+    var file_char: String = from_coord.substr(0, 1)
+    var rank_number: int = int(from_coord.substr(1))
+    var direction: int = 1 if is_white else -1
+    var one_step_coord: String = _advance_coord(file_char, rank_number, 0, direction)
+    var two_step_coord: String = _advance_coord(file_char, rank_number, 0, direction * 2)
     if one_step_coord == "" or two_step_coord == "":
         return
     if _piece_exists_at(one_step_coord, state) or _piece_exists_at(two_step_coord, state):

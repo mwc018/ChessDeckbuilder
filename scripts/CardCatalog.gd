@@ -34,6 +34,7 @@ const CARD_SCENES: Dictionary = {
     "Coronation": preload("res://scenes/cards/Coronation.tscn"),
     "Royal Guard": preload("res://scenes/cards/RoyalGuard.tscn"),
     "Sanctuary": preload("res://scenes/cards/Sanctuary.tscn"),
+    "March": preload("res://scenes/cards/March.tscn"),
 }
 
 # The singleton starting deck — one copy of each card a run begins with.
@@ -44,7 +45,7 @@ const CARD_SCENES: Dictionary = {
 # in CARD_SCENES above and fully working, just not part of the starting
 # deck.
 const STARTING_DECK_CARD_NAMES: Array[String] = [
-    "Overextend", "Battering Ram", "Stride", "Gallop", "Trample", "Sidestep", "Free Rein", "Open Gate", "Divine Exception", "Leap of Faith", "Clean Slate", "Drift", "Conscript",
+    "Overextend", "Battering Ram", "Stride", "Gallop", "Trample", "Sidestep", "Free Rein", "Open Gate", "Divine Exception", "Leap of Faith",
 ]
 
 # The pool the victory screen's 3-card draft draws from — the cards left
@@ -57,5 +58,5 @@ const STARTING_DECK_CARD_NAMES: Array[String] = [
 const REWARD_POOL_CARD_NAMES: Array[String] = [
     "Square Dance", "Homecoming", "Withdrawal", "Absolution",
     "Return to Court", "Royal Recall", "Pilgrimage", "Coronation",
-    "Royal Guard", "Sanctuary",
+    "Royal Guard", "Sanctuary", "March", "Clean Slate", "Drift", "Conscript",
 ]
