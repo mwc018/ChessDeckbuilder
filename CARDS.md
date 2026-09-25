@@ -16,7 +16,7 @@ spending it.
 
 ## Starting deck
 
-One copy of each of the following (13 cards total):
+One copy of each of the following (10 cards total):
 
 - Overextend
 - Battering Ram
@@ -28,19 +28,19 @@ One copy of each of the following (13 cards total):
 - Open Gate
 - Divine Exception
 - Leap of Faith
-- Clean Slate
-- Drift
-- Conscript
 
 **Not in the starting deck:** Square Dance, Strafe, Homecoming, Withdrawal,
-Absolution, Return to Court, Royal Recall, Pilgrimage, Coronation, Royal
-Guard, and Sanctuary — all fully working and registered, just not dealt at
-game start. Strafe is just being held back for now; the other ten are the
-victory-screen reward pool (see below). Going forward, new piece-specific
-bonus cards default to the reward pool rather than the starting deck, to
-keep the starting deck from growing indefinitely as more cards get built
-(see `CARD_IDEAS.md` and the "starting card pool size" discussion) —
-Pilgrimage was the first card built under that approach.
+Absolution, Return to Court, Royal Recall, Clean Slate, Drift, Conscript,
+Pilgrimage, Coronation, Royal Guard, Sanctuary, and March — all fully
+working and registered, just not dealt at game start. Strafe is just being
+held back for now; the other fourteen are the victory-screen reward pool
+(see below). Clean Slate, Drift, and Conscript originally shipped in the
+starting deck but were later moved to the reward pool to match. Going
+forward, new piece-specific bonus cards default to the reward pool rather
+than the starting deck, to keep the starting deck from growing indefinitely
+as more cards get built (see `CARD_IDEAS.md` and the "starting card pool
+size" discussion) — Pilgrimage was the first card built under that
+approach.
 
 ## Winning a match: the card draft
 
@@ -84,6 +84,7 @@ from the updated list, not the original starting deck.
 | Coronation | 2 | Action | The next Queen to move does not spend your one action for the turn. | "The crown does not ask permission to move." |
 | Royal Guard | 2 | Action | The next King to move does not spend your one action for the turn. | "Even kings need not walk alone." |
 | Sanctuary | 1 | Action | The next Bishop to move may instead swap places with your King, without spending your one action for the turn. | "Even a king may take shelter in faith." |
+| March | 2 | Power | Pawns can always move 2 squares forward. This effect lasts for the rest of the round. | "No ground is too far to cover." |
 
 ## Card effect lifetimes
 
@@ -108,6 +109,23 @@ from the updated list, not the original starting deck.
 - **Clean Slate** — not a "next move" window at all; it resolves the
   instant it's played (discard the rest of hand, draw that many back),
   with no pending_* flag and no interaction with piece movement.
+- **March** — not a "next move" window either, but for the opposite reason:
+  once played, `march_active` stays true for the rest of the round —
+  through every future move and every End Turn — rather than being spent
+  by the next move like every card above. It's only cleared by starting a
+  new match. As a Power card, March is also removed from the deck outright
+  when played (see "Power cards" below), so it can never be drawn again
+  this round anyway.
+
+## Power cards
+
+March is the first card of the POWER type (see `Card.CardType` in
+`scripts/Card.gd`). Powers are unique: `_drop_data` in `Board.gd` skips
+`discard_card_name` for a POWER card when it's played, so it never lands in
+the discard pile and can't be dealt back out by a later reshuffle. Combined
+with an effect that isn't cleared by End Turn (see "Card effect lifetimes"
+above), this makes a Power a one-time, permanent-for-the-round purchase —
+once played, it's both gone from the deck and active for good.
 
 ## Same-piece-type collisions
 
