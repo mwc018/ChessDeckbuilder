@@ -16,8 +16,11 @@ const RESERVED_BOTTOM_HEIGHT: float = 340.0
 const ENERGY_DISPLAY_GAP: float = 24.0
 const END_TURN_BUTTON_GAP: float = 24.0
 
-const MATCH_SCENE_PATH: String = "res://scenes/Match.tscn"
+const MAP_SCENE_PATH: String = "res://scenes/Map.tscn"
 const VICTORY_SCENE_PATH: String = "res://scenes/Victory.tscn"
+const DEFEAT_SCENE_PATH: String = "res://scenes/Defeat.tscn"
+
+const SETUP_STATUS_TEXT: String = "Arrange your pieces — click a piece, then a highlighted one to swap"
 
 # AI difficulty is randomized per game within board.ai_difficulty_min/max
 # (set in the editor on the Board node) — see Board.randomize_ai_difficulty().
@@ -30,18 +33,37 @@ func _ready() -> void:
         board.energy_changed.connect(_on_energy_changed)
         board.turn_started.connect(_on_turn_started)
         board.match_won.connect(_on_match_won)
+        board.match_lost.connect(_on_match_lost)
+        board.load_layout(RunState.build_match_layout())
         board.initialize_deck(RunState.deck_card_names)
-        _on_board_status_changed(board.last_status_text)
         _on_energy_changed(board.energy, board.MAX_ENERGY)
-        # The game starts on the player's turn already, so turn_started never
-        # fires for it "for free" — prime the very first hand manually, same
-        # reason the two lines above prime energy/status manually too.
-        _on_turn_started()
+        # Setup only happens when there's something to arrange — with an
+        # all-standard army every arrangement is the same.
+        if RunState.army_has_fairy_pieces():
+            board.setup_mode = true
+            _update_end_turn_button()
+            if status_label != null:
+                status_label.text = SETUP_STATUS_TEXT
+        else:
+            _begin_play()
     if end_turn_button != null:
         end_turn_button.pressed.connect(_on_end_turn_pressed)
     if debug_win_button != null and board != null:
         debug_win_button.pressed.connect(board.debug_win)
     _update_progress_label()
+
+# Leaves setup (if it ran) and starts the actual game. The game starts on
+# the player's turn already, so turn_started never fires for it "for free" —
+# the first hand is drawn manually here, the same reason status is primed
+# manually.
+func _begin_play() -> void:
+    if board.setup_mode:
+        RunState.army_layout = board.get_player_layout()
+        board.begin_play()
+    if end_turn_button != null:
+        end_turn_button.text = "End Turn"
+    _on_board_status_changed(board.last_status_text)
+    _on_turn_started()
 
 func _on_board_status_changed(text: String) -> void:
     if status_label != null:
@@ -97,29 +119,38 @@ func _draw_cards(count: int) -> void:
 # up to 3 cards drawn from CardCatalog.REWARD_POOL_CARD_NAMES, excluding
 # whatever's already in RunState.deck_card_names (no offering a duplicate
 # of something already drafted). If nothing's left in the pool, skip the
-# draft screen entirely and go straight to the next match. This changes
+# draft screen entirely and go straight back to the map. This changes
 # scenes to Victory.tscn (rather than showing it as an overlay) so the
 # board/hand aren't visible — and distracting — behind it.
 func _on_match_won() -> void:
+    RunState.complete_pending_node()
     var eligible: Array[String] = []
     for card_name in CardCatalog.REWARD_POOL_CARD_NAMES:
         if not (card_name in RunState.deck_card_names):
             eligible.append(card_name)
     if eligible.is_empty():
         # Nothing left in the reward pool — skip the draft screen entirely
-        # and go straight into the next match.
+        # and go straight back to the map.
         RunState.advance_to_new_match()
-        get_tree().change_scene_to_file(MATCH_SCENE_PATH)
+        get_tree().change_scene_to_file(MAP_SCENE_PATH)
         return
     eligible.shuffle()
     RunState.pending_reward_offer = eligible.slice(0, min(3, eligible.size()))
     get_tree().change_scene_to_file(VICTORY_SCENE_PATH)
+
+# A loss ends the run — see Defeat.gd, which offers a fresh one.
+func _on_match_lost() -> void:
+    get_tree().change_scene_to_file(DEFEAT_SCENE_PATH)
 
 # The End Turn button: whatever's left in hand is discarded (not played —
 # freed directly rather than via confirm_played(), so no card effect
 # applies and no energy is spent), then Board ends the turn.
 func _on_end_turn_pressed() -> void:
     if board == null or hand_container == null:
+        return
+    # During setup this same button reads "Start Match".
+    if board.setup_mode:
+        _begin_play()
         return
     for card in hand_container.get_children():
         board.discard_card_name(card.card_name)
@@ -129,6 +160,10 @@ func _on_end_turn_pressed() -> void:
 
 func _update_end_turn_button() -> void:
     if end_turn_button == null or board == null:
+        return
+    if board.setup_mode:
+        end_turn_button.text = "Start Match"
+        end_turn_button.disabled = false
         return
     end_turn_button.disabled = board.game_over or board.awaiting_promotion or board.current_turn != board.PLAYER_COLOR
 

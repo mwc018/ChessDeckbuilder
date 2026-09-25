@@ -9,42 +9,10 @@ signal turn_started
 # Fired on a real win (checkmate) or a debug_win() call — lets Match show
 # the victory/card-draft screen.
 signal match_won
+# Fired when the player runs out of legal moves — ends the run.
+signal match_lost
 
 const FILES: PackedStringArray = ["a", "b", "c", "d", "e", "f", "g", "h"]
-const STARTING_LAYOUT := {
-    "a8": "♜",
-    "b8": "♞",
-    "c8": "♝",
-    "d8": "♛",
-    "e8": "♚",
-    "f8": "♝",
-    "g8": "♞",
-    "h8": "♜",
-    "a7": "♟",
-    "b7": "♟",
-    "c7": "♟",
-    "d7": "♟",
-    "e7": "♟",
-    "f7": "♟",
-    "g7": "♟",
-    "h7": "♟",
-    "a2": "♙",
-    "b2": "♙",
-    "c2": "♙",
-    "d2": "♙",
-    "e2": "♙",
-    "f2": "♙",
-    "g2": "♙",
-    "h2": "♙",
-    "a1": "♖",
-    "b1": "♘",
-    "c1": "♗",
-    "d1": "♕",
-    "e1": "♔",
-    "f1": "♗",
-    "g1": "♘",
-    "h1": "♖",
-}
 
 # The human player always plays White; there is no draw outcome — whichever
 # side runs out of legal moves (whether checkmated or merely stalemated) loses.
@@ -77,6 +45,14 @@ var selected_piece_moves: Array[String] = []
 # Logical board state (coord -> piece symbol), kept in sync with piece_nodes.
 # Separate from the visual layer so moves can be simulated without touching the scene tree.
 var board_state: Dictionary = {}
+# The position every game on this board starts from (coord -> symbol).
+# Defaults to standard chess; Match replaces it with the run's army via
+# load_layout() before play starts.
+var starting_layout: Dictionary = PieceCatalog.STANDARD_WHITE_LAYOUT.merged(PieceCatalog.STANDARD_BLACK_LAYOUT)
+# Pre-match setup: while true, the player can only rearrange their own
+# pieces among their class's squares (see _on_setup_click) — no moves, no
+# cards, no End Turn. Match turns it off with begin_play().
+var setup_mode: bool = false
 # Whether each side still has the right to castle on that side, i.e. neither
 # the king nor that rook has moved (or been captured) yet this game. Kept as
 # plain instance state — separate from board_state — because it depends on
@@ -475,6 +451,60 @@ func _layout_board() -> void:
             overlay.size = Vector2(max(square.size.x - 14.0, 0.0), max(square.size.y - 14.0, 0.0))
             overlay.position = Vector2(7.0, 7.0)
 
+# Replaces the position this board starts from and re-places every piece.
+# Called by Match right after the board is ready, with the run's army plus
+# the enemy's pieces.
+func load_layout(layout: Dictionary) -> void:
+    starting_layout = layout
+    selected_piece_coord = ""
+    _clear_move_highlights()
+    for coord in piece_nodes.keys():
+        var piece: Control = piece_nodes[coord]
+        if piece != null:
+            piece.free()
+    piece_nodes.clear()
+    _place_pieces()
+    _layout_board()
+    _update_status()
+
+# Clicking during setup: pick one of your pieces, and every other piece of
+# the same class — standing on one of that class's starting squares — lights
+# up; click one of those to swap the two. Pieces identical to the selected
+# one aren't offered, since swapping them would change nothing.
+func _on_setup_click(coord: String) -> void:
+    if selected_piece_coord != "" and coord in selected_piece_moves:
+        _swap_piece_nodes(selected_piece_coord, coord)
+        coord = ""
+    var was_selected: bool = coord == selected_piece_coord
+    selected_piece_coord = ""
+    _clear_move_highlights()
+    if coord != "" and not was_selected and board_state.has(coord) and _is_white_piece(board_state[coord]) == (PLAYER_COLOR == "white"):
+        var symbol: String = board_state[coord]
+        for other in board_state.keys():
+            var other_symbol: String = board_state[other]
+            if other_symbol != symbol and _is_white_piece(other_symbol) == _is_white_piece(symbol) and PieceCatalog.class_symbol(other_symbol) == PieceCatalog.class_symbol(symbol):
+                _apply_move_square_style(other, "swap")
+                highlighted_moves.append(other)
+        selected_piece_coord = coord
+        selected_piece_moves = highlighted_moves.duplicate()
+    _set_piece_selection_state()
+
+# Ends setup and starts the actual game.
+func begin_play() -> void:
+    setup_mode = false
+    selected_piece_coord = ""
+    _clear_move_highlights()
+    _set_piece_selection_state()
+
+# The player's pieces as they currently stand (coord -> symbol) — read by
+# Match at the end of setup so the arrangement carries into the next match.
+func get_player_layout() -> Dictionary:
+    var layout: Dictionary = {}
+    for coord in board_state.keys():
+        if _is_white_piece(board_state[coord]) == (PLAYER_COLOR == "white"):
+            layout[coord] = board_state[coord]
+    return layout
+
 func _place_pieces() -> void:
     board_state.clear()
     castle_rights = {
@@ -484,15 +514,15 @@ func _place_pieces() -> void:
         "black_queen_side": true,
     }
     en_passant_target = ""
-    for coord in STARTING_LAYOUT.keys():
+    for coord in starting_layout.keys():
         var square: ColorRect = square_nodes.get(coord)
         if square == null:
             continue
 
         var piece: Control = PIECE_SCENE.instantiate()
         piece.name = coord
-        piece.symbol = STARTING_LAYOUT[coord]
-        piece.dark = _is_dark_piece(STARTING_LAYOUT[coord])
+        piece.symbol = starting_layout[coord]
+        piece.dark = _is_dark_piece(starting_layout[coord])
         piece.board = self
         piece.square_coord = coord
         piece.mouse_filter = Control.MOUSE_FILTER_STOP
@@ -504,11 +534,11 @@ func _place_pieces() -> void:
         piece.offset_right = 0
         piece.offset_bottom = 0
         piece_nodes[coord] = piece
-        board_state[coord] = STARTING_LAYOUT[coord]
+        board_state[coord] = starting_layout[coord]
 
 func _on_piece_hovered(coord: String) -> void:
     hovered_piece_coord = coord
-    if game_over or awaiting_promotion:
+    if game_over or awaiting_promotion or setup_mode:
         return
     # Pieces still receive mouse-enter/exit while a card is being dragged
     # over them (their mouse_filter has to be PASS so a card can be dropped
@@ -526,6 +556,9 @@ func _on_piece_unhovered() -> void:
 
 func _on_piece_clicked(coord: String) -> void:
     if game_over or awaiting_promotion:
+        return
+    if setup_mode:
+        _on_setup_click(coord)
         return
 
     if coord == selected_piece_coord:
@@ -561,7 +594,7 @@ func _on_piece_clicked(coord: String) -> void:
 func _can_drop_data(_at_position: Vector2, data: Variant) -> bool:
     if typeof(data) != TYPE_DICTIONARY or data.get("type") != "card":
         return false
-    if game_over or awaiting_promotion or current_turn != PLAYER_COLOR:
+    if game_over or awaiting_promotion or setup_mode or current_turn != PLAYER_COLOR:
         return false
     var card: Control = data.get("card")
     return card != null and is_instance_valid(card) and card.cost <= energy
@@ -623,7 +656,7 @@ func discard_card_name(card_name: String) -> void:
 # piece-type-gated clears in _finish_move; they just don't carry past
 # end_turn() the way they used to).
 func end_turn() -> void:
-    if game_over or awaiting_promotion or current_turn != PLAYER_COLOR:
+    if game_over or awaiting_promotion or setup_mode or current_turn != PLAYER_COLOR:
         return
     pending_overextend = false
     pending_stride = false
@@ -722,6 +755,13 @@ func _on_square_input(event: InputEvent, coord: String) -> void:
     if game_over or awaiting_promotion:
         return
     if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+        # Setup clicks are always on a piece, and Piece already routes them
+        # through _on_piece_clicked — its PASS mouse_filter then bubbles
+        # the same click up to this square, which must not handle it a
+        # second time (that would immediately deselect what was just
+        # selected).
+        if setup_mode:
+            return
         if selected_piece_coord != "" and coord in selected_piece_moves:
             _attempt_move(selected_piece_coord, coord)
 
@@ -815,6 +855,15 @@ func _apply_move_square_style(coord: String, style: String) -> void:
         square.color = Color(0.80, 1.0, 0.84, 1.0)
         overlay.color = Color(0.12, 0.60, 0.24, 1.0)
         overlay.z_index = 2
+        overlay.set_meta("default_color", overlay.color)
+    elif style == "swap":
+        # Setup swap targets always hold a piece, so this one is drawn
+        # behind the piece rather than over it — the piece you'd be
+        # swapping with has to stay visible.
+        square.color = Color(0.80, 1.0, 0.84, 1.0)
+        overlay.color = Color(0.12, 0.60, 0.24, 0.85)
+        overlay.z_index = 0
+        square.move_child(overlay, 0)
         overlay.set_meta("default_color", overlay.color)
     else:
         square.color = Color(0.18, 0.54, 0.25, 0.78)
@@ -980,16 +1029,16 @@ func _move_piece(from_coord: String, to_coord: String, promotion_symbol: String 
     # key — those all require the king starting from e1/e8, not returning to
     # it), so the move already went through all that logic above like any
     # other move — it just needs to skip spending the action once it's done.
-    var is_free_rein_knight_move: bool = pending_free_rein and moving_symbol == "♘"
-    var is_homecoming_knight_move: bool = pending_homecoming and moving_symbol == "♘"
-    var is_withdrawal_rook_move: bool = pending_withdrawal and moving_symbol == "♖"
-    var is_absolution_bishop_move: bool = pending_absolution and moving_symbol == "♗"
-    var is_return_to_court_queen_move: bool = pending_return_to_court and moving_symbol == "♕"
+    var is_free_rein_knight_move: bool = pending_free_rein and PieceCatalog.class_symbol(moving_symbol) == "♘"
+    var is_homecoming_knight_move: bool = pending_homecoming and PieceCatalog.class_symbol(moving_symbol) == "♘"
+    var is_withdrawal_rook_move: bool = pending_withdrawal and PieceCatalog.class_symbol(moving_symbol) == "♖"
+    var is_absolution_bishop_move: bool = pending_absolution and PieceCatalog.class_symbol(moving_symbol) == "♗"
+    var is_return_to_court_queen_move: bool = pending_return_to_court and PieceCatalog.class_symbol(moving_symbol) == "♕"
     var is_royal_recall_king_move: bool = pending_royal_recall and moving_symbol == "♔"
-    var is_open_gate_rook_move: bool = pending_open_gate and moving_symbol == "♖"
-    var is_divine_exception_bishop_move: bool = pending_divine_exception and moving_symbol == "♗"
+    var is_open_gate_rook_move: bool = pending_open_gate and PieceCatalog.class_symbol(moving_symbol) == "♖"
+    var is_divine_exception_bishop_move: bool = pending_divine_exception and PieceCatalog.class_symbol(moving_symbol) == "♗"
     var is_conscript_pawn_move: bool = pending_conscript and moving_symbol == "♙"
-    var is_coronation_queen_move: bool = pending_coronation and moving_symbol == "♕"
+    var is_coronation_queen_move: bool = pending_coronation and PieceCatalog.class_symbol(moving_symbol) == "♕"
     var is_royal_guard_king_move: bool = pending_royal_guard and moving_symbol == "♔"
     var is_action_exempt_move: bool = (
         is_free_rein_knight_move or is_homecoming_knight_move or
@@ -1045,12 +1094,12 @@ func _finish_move(moving_symbol: String, is_action_exempt: bool = false) -> void
         # wait for the next move of their own piece type specifically,
         # however many other moves happen first — spent once that piece
         # moves, whether or not the bonus was used.
-        if moving_symbol == "♖":
+        if PieceCatalog.class_symbol(moving_symbol) == "♖":
             pending_battering_ram = false
             pending_drift = false
-        if moving_symbol == "♘":
+        if PieceCatalog.class_symbol(moving_symbol) == "♘":
             pending_gallop = false
-        if moving_symbol == "♗":
+        if PieceCatalog.class_symbol(moving_symbol) == "♗":
             pending_leap_of_faith = false
             pending_pilgrimage = false
         if not is_action_exempt:
@@ -1196,6 +1245,7 @@ func _update_status() -> void:
         game_over = true
         if current_turn == PLAYER_COLOR:
             _set_status("You lose")
+            match_lost.emit()
         else:
             _set_status("You win!")
             match_won.emit()
@@ -1360,25 +1410,25 @@ func _collect_legal_moves_for_piece(symbol: String, from_coord: String, state: D
         _add_sidestep_destinations(from_coord, state, is_white, result)
     if pending_strafe and symbol == "♙":
         _add_strafe_destinations(from_coord, state, is_white, result)
-    if pending_battering_ram and symbol == "♖":
+    if pending_battering_ram and PieceCatalog.class_symbol(symbol) == "♖":
         _add_battering_ram_destination(from_coord, state, is_white, result)
-    if pending_drift and symbol == "♖":
+    if pending_drift and PieceCatalog.class_symbol(symbol) == "♖":
         _add_drift_destinations(from_coord, state, is_white, result)
-    if pending_withdrawal and symbol == "♖":
+    if pending_withdrawal and PieceCatalog.class_symbol(symbol) == "♖":
         _add_withdrawal_destinations(from_coord, state, is_white, result)
-    if pending_gallop and symbol == "♘":
+    if pending_gallop and PieceCatalog.class_symbol(symbol) == "♘":
         _add_gallop_destinations(from_coord, state, is_white, result)
-    if pending_homecoming and symbol == "♘":
+    if pending_homecoming and PieceCatalog.class_symbol(symbol) == "♘":
         _add_homecoming_destinations(from_coord, state, is_white, result)
-    if pending_leap_of_faith and symbol == "♗":
+    if pending_leap_of_faith and PieceCatalog.class_symbol(symbol) == "♗":
         _add_leap_of_faith_destinations(from_coord, state, is_white, result)
-    if pending_pilgrimage and symbol == "♗":
+    if pending_pilgrimage and PieceCatalog.class_symbol(symbol) == "♗":
         _add_pilgrimage_destinations(from_coord, state, is_white, result)
-    if pending_absolution and symbol == "♗":
+    if pending_absolution and PieceCatalog.class_symbol(symbol) == "♗":
         _add_absolution_destinations(from_coord, state, is_white, result)
-    if pending_sanctuary and symbol == "♗":
+    if pending_sanctuary and PieceCatalog.class_symbol(symbol) == "♗":
         _add_sanctuary_destinations(from_coord, state, is_white, result)
-    if pending_return_to_court and symbol == "♕":
+    if pending_return_to_court and PieceCatalog.class_symbol(symbol) == "♕":
         _add_return_to_court_destinations(from_coord, state, is_white, result)
     if pending_royal_recall and symbol == "♔":
         _add_royal_recall_destinations(from_coord, state, is_white, result)
@@ -1408,25 +1458,25 @@ func _collect_legal_moves_for_piece(symbol: String, from_coord: String, state: D
 # function generated would consume an action the player no longer has.
 # Paths are cleared too since none of these exempt moves are a slide.
 func _restrict_to_action_exempt_destinations(symbol: String, from_coord: String, state: Dictionary, is_white: bool, result: Dictionary) -> void:
-    if pending_free_rein and symbol == "♘":
+    if pending_free_rein and PieceCatalog.class_symbol(symbol) == "♘":
         return
-    if pending_homecoming and symbol == "♘":
+    if pending_homecoming and PieceCatalog.class_symbol(symbol) == "♘":
         return
-    if pending_withdrawal and symbol == "♖":
+    if pending_withdrawal and PieceCatalog.class_symbol(symbol) == "♖":
         return
-    if pending_absolution and symbol == "♗":
+    if pending_absolution and PieceCatalog.class_symbol(symbol) == "♗":
         return
-    if pending_return_to_court and symbol == "♕":
+    if pending_return_to_court and PieceCatalog.class_symbol(symbol) == "♕":
         return
     if pending_royal_recall and symbol == "♔":
         return
-    if pending_open_gate and symbol == "♖":
+    if pending_open_gate and PieceCatalog.class_symbol(symbol) == "♖":
         return
-    if pending_divine_exception and symbol == "♗":
+    if pending_divine_exception and PieceCatalog.class_symbol(symbol) == "♗":
         return
     if pending_conscript and symbol == "♙":
         return
-    if pending_coronation and symbol == "♕":
+    if pending_coronation and PieceCatalog.class_symbol(symbol) == "♕":
         return
     if pending_royal_guard and symbol == "♔":
         return
@@ -1943,7 +1993,7 @@ func _rook_direction(from_coord: String, to_coord: String) -> Vector2i:
 # pending (not currently possible — the effect is human-only — but this way
 # the two can't drift out of sync if that ever changes).
 func _resolve_battering_ram_pierce(from_coord: String, to_coord: String, moving_symbol: String) -> String:
-    if not pending_battering_ram or moving_symbol != "♖":
+    if not pending_battering_ram or PieceCatalog.class_symbol(moving_symbol) != "♖":
         return ""
     var dir: Vector2i = _rook_direction(from_coord, to_coord)
     if dir == Vector2i.ZERO:
@@ -2138,8 +2188,6 @@ func _is_square_attacked(coord: String, by_white: bool, state: Dictionary) -> bo
 func _collect_moves_for_piece(symbol: String, from_coord: String, state: Dictionary) -> Dictionary:
     var destinations: Array[String] = []
     var paths: Array[String] = []
-    var file_index: int = _file_to_index(from_coord.substr(0, 1))
-    var rank: int = int(from_coord.substr(1, 1))
     var file_char: String = from_coord.substr(0, 1)
     var rank_number: int = int(from_coord.substr(1))
     var is_white: bool = _is_white_piece(symbol)
@@ -2162,6 +2210,11 @@ func _collect_moves_for_piece(symbol: String, from_coord: String, state: Diction
                 destinations.append(capture_coord)
         return {"destinations": destinations, "paths": paths}
 
+    if PieceCatalog.is_fairy(symbol):
+        _add_slide_moves(from_coord, PieceCatalog.slides(symbol), state, is_white, destinations, paths)
+        _add_step_moves(from_coord, PieceCatalog.steps(symbol), state, is_white, destinations)
+        return {"destinations": destinations, "paths": paths}
+
     var directions: Array[Vector2i] = []
     match symbol:
         "♖", "♜":
@@ -2176,12 +2229,27 @@ func _collect_moves_for_piece(symbol: String, from_coord: String, state: Diction
             directions = [Vector2i(1, 2), Vector2i(1, -2), Vector2i(-1, 2), Vector2i(-1, -2), Vector2i(2, 1), Vector2i(2, -1), Vector2i(-2, 1), Vector2i(-2, -1)]
 
     if symbol == "♔" or symbol == "♚" or symbol == "♘" or symbol == "♞":
-        for offset in directions:
-            var coord: String = _advance_coord(file_char, rank_number, offset.x, offset.y)
-            if coord != "" and (not _piece_exists_at(coord, state) or _is_white_piece(_piece_symbol_at(coord, state)) != is_white):
-                destinations.append(coord)
-        return {"destinations": destinations, "paths": paths}
+        _add_step_moves(from_coord, directions, state, is_white, destinations)
+    else:
+        _add_slide_moves(from_coord, directions, state, is_white, destinations, paths)
+    return {"destinations": destinations, "paths": paths}
 
+# One jump to each offset (king/knight-style): lands on an empty square or
+# captures an enemy piece; nothing in between matters.
+func _add_step_moves(from_coord: String, offsets: Array, state: Dictionary, is_white: bool, destinations: Array[String]) -> void:
+    var file_char: String = from_coord.substr(0, 1)
+    var rank_number: int = int(from_coord.substr(1))
+    for offset in offsets:
+        var coord: String = _advance_coord(file_char, rank_number, offset.x, offset.y)
+        if coord != "" and (not _piece_exists_at(coord, state) or _is_white_piece(_piece_symbol_at(coord, state)) != is_white):
+            destinations.append(coord)
+
+# Slides any distance in each direction (bishop/rook/queen-style), stopping
+# at the first piece — capturing it if it's an enemy. Every square slid
+# through on the way to a further destination is also recorded as a path.
+func _add_slide_moves(from_coord: String, directions: Array, state: Dictionary, is_white: bool, destinations: Array[String], paths: Array[String]) -> void:
+    var file_index: int = _file_to_index(from_coord.substr(0, 1))
+    var rank: int = int(from_coord.substr(1, 1))
     for offset in directions:
         var x: int = file_index
         var y: int = rank - 1
@@ -2207,8 +2275,6 @@ func _collect_moves_for_piece(symbol: String, from_coord: String, state: Diction
         for coord in reached:
             destinations.append(coord)
 
-    return {"destinations": destinations, "paths": paths}
-
 func _piece_exists_at(coord: String, state: Dictionary) -> bool:
     return state.has(coord)
 
@@ -2216,7 +2282,7 @@ func _piece_symbol_at(coord: String, state: Dictionary) -> String:
     return state.get(coord, "")
 
 func _is_white_piece(symbol: String) -> bool:
-    return ["♙", "♖", "♘", "♗", "♕", "♔"].has(symbol)
+    return PieceCatalog.is_white(symbol)
 
 # Used by the card-granted "extra capture" bonuses (Trample, Battering Ram,
 # Gallop, Leap of Faith) to refuse ever targeting a king. Those bonuses give
@@ -2252,4 +2318,4 @@ func _file_to_index(file_name: String) -> int:
     return -1
 
 func _is_dark_piece(symbol: String) -> bool:
-    return ["♟", "♜", "♞", "♝", "♛", "♚"].has(symbol)
+    return PieceCatalog.is_black(symbol)

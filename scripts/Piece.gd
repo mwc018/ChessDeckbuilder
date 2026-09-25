@@ -7,11 +7,29 @@ var square_coord: String = ""
 var selected: bool = false
 var hover_pulse: Tween = null
 
+const BADGE_COLOR := Color(1.0, 0.85, 0.4, 1)
+
 @onready var label: Label = $Label
+# Fairy pieces are drawn as their class's glyph plus this letter (e.g. the
+# Archbishop is a bishop with an "A") — built in _ready(), empty for
+# standard pieces.
+var badge_label: Label = null
 
 func _ready() -> void:
-	label.text = symbol
-	label.modulate = Color(0.15, 0.12, 0.08, 1) if dark else Color(1.0, 1.0, 1.0, 1)
+	badge_label = Label.new()
+	badge_label.name = "Badge"
+	badge_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	badge_label.add_theme_font_size_override("font_size", 15)
+	badge_label.add_theme_color_override("font_color", BADGE_COLOR)
+	badge_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 1))
+	badge_label.add_theme_constant_override("outline_size", 5)
+	badge_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	badge_label.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
+	badge_label.set_anchors_preset(Control.PRESET_FULL_RECT)
+	badge_label.offset_right = -4
+	badge_label.offset_bottom = -1
+	add_child(badge_label)
+	_refresh_symbol()
 	set_anchors_preset(Control.PRESET_TOP_LEFT)
 	label.set_anchors_preset(Control.PRESET_FULL_RECT)
 	label.set_offsets_preset(Control.PRESET_FULL_RECT)
@@ -44,8 +62,15 @@ func _on_piece_input(event: InputEvent) -> void:
 func set_symbol(new_symbol: String, new_dark: bool) -> void:
 	symbol = new_symbol
 	dark = new_dark
-	label.text = symbol
+	_refresh_symbol()
+
+func _refresh_symbol() -> void:
+	label.text = PieceCatalog.display_glyph(symbol)
 	label.modulate = Color(0.15, 0.12, 0.08, 1) if dark else Color(1.0, 1.0, 1.0, 1)
+	badge_label.text = PieceCatalog.badge(symbol)
+	var piece_name: String = PieceCatalog.display_name(symbol)
+	tooltip_text = "" if piece_name == "" else "%s
+%s" % [piece_name, PieceCatalog.description(symbol)]
 
 func set_selected(value: bool) -> void:
 	selected = value

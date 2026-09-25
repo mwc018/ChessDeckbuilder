@@ -6,7 +6,7 @@ extends Control
 # this one exists, offered_card_names comes from the RunState autoload
 # (RunState.pending_reward_offer, set by Match right before the scene
 # change) instead of being set directly by a caller.
-const MATCH_SCENE_PATH: String = "res://scenes/Match.tscn"
+const MAP_SCENE_PATH: String = "res://scenes/Map.tscn"
 
 const TITLE_COLOR := Color(1.0, 0.85, 0.4, 1.0)
 const SUBTITLE_COLOR := Color(0.9, 0.9, 0.9, 1.0)
@@ -204,10 +204,10 @@ func _on_confirm_pressed() -> void:
         return
     RunState.deck_card_names.append(offered_card_names[_selected_index])
     RunState.advance_to_new_match()
-    get_tree().change_scene_to_file(MATCH_SCENE_PATH)
+    get_tree().change_scene_to_file(MAP_SCENE_PATH)
 
 func _on_skip_pressed() -> void:
     if _selected_index != -1:
         return
     RunState.advance_to_new_match()
-    get_tree().change_scene_to_file(MATCH_SCENE_PATH)
+    get_tree().change_scene_to_file(MAP_SCENE_PATH)

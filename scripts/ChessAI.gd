@@ -11,15 +11,6 @@ class_name ChessAI
 ## play a random legal move instead of the best one ("blunder chance"), and
 ## noise added to the evaluation so close positions get misjudged.
 
-const PIECE_VALUES := {
-    "♙": 100, "♟": 100,
-    "♘": 320, "♞": 320,
-    "♗": 330, "♝": 330,
-    "♖": 500, "♜": 500,
-    "♕": 900, "♛": 900,
-    "♔": 0, "♚": 0,
-}
-const WHITE_SYMBOLS: Array = ["♙", "♖", "♘", "♗", "♕", "♔"]
 const NO_MOVES_SCORE: float = 100000.0
 
 var rng := RandomNumberGenerator.new()
@@ -105,8 +96,8 @@ func _evaluate(state: Dictionary, perspective_is_white: bool, eval_noise: float)
     var material: float = 0.0
     for coord in state.keys():
         var symbol: String = state[coord]
-        var value: float = PIECE_VALUES.get(symbol, 0)
-        material += value if WHITE_SYMBOLS.has(symbol) else -value
+        var value: float = PieceCatalog.value(symbol)
+        material += value if PieceCatalog.is_white(symbol) else -value
 
     if eval_noise > 0.0:
         material += rng.randf_range(-eval_noise, eval_noise)
